@@ -1,5 +1,7 @@
 // ============================================================================
-// web_interface.h - Интерфейс между веб-сервером и основной логикой
+// web_interface.h - Интерфейс для команд с веба
+// ============================================================================
+// Проект: Heat-Chamber
 // ============================================================================
 
 #ifndef WEB_INTERFACE_H
@@ -7,35 +9,25 @@
 
 #include <Arduino.h>
 #include <functional>
-#include "wifi_webserver.h"
+#include <WebSocketsServer.h>
+#include "web_server.h"
 
-// Структура для обратных вызовов (команды от веб-клиентов)
+// ============================================================================
+// СТРУКТУРА КОЛБЭКОВ
+// ============================================================================
 struct WebCallbacks {
-  std::function<void(float)> onSetTarget;        // изменение уставки
-  std::function<void(bool)> onSetPower;          // вкл/выкл
-  std::function<void(float, float, float)> onSetPID; // установка Kp, Ki, Kd
-  std::function<void()> onReset;                  // перезагрузка системы
+  std::function<void(float)> onSetTarget;   // изменение уставки
+  std::function<void(bool)> onSetPower;     // вкл/выкл
+  std::function<void(float,float,float)> onSetPID; // коэффициенты ПИД
+  std::function<void()> onReset;             // перезагрузка
 };
 
-// Инициализация веб-интерфейса с колбэками
+// ============================================================================
+// ФУНКЦИИ
+// ============================================================================
 void initWebInterface(const WebCallbacks& callbacks);
-
-// Отправка текущих данных всем клиентам
-void sendWebData(
-  float guildTemp,
-  float wall100,
-  float wall75,
-  float wall50,
-  int mode,
-  int color,
-  const char* timeStr,
-  float baseTemp
-);
-
-// Отправка подтверждения клиенту
-void sendWebAck(uint8_t clientNum, const char* command, bool success);
-
-// Проверка, есть ли подключённые клиенты
+void sendWebData(float t0, float t1, float t2, float target, bool state, const char* timeStr);
+void webSocketEventHandler(uint8_t num, WStype_t type, uint8_t* payload, size_t length);
 bool isWebClientConnected();
 
-#endif
+#endif // WEB_INTERFACE_H
