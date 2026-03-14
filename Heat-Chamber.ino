@@ -1,341 +1,233 @@
-/*
- * ПИД-регулятор температуры с ШИМ управлением нагревателем и графиками
- * Особенности:
- * - Управление нагревом через ПИД-регулятор (используется библиотека uPID)
- * - Чтение температуры с 3 датчиков DS18B20
- * - Вывод информации на графический дисплей с историей температур
- * - Управление через кнопки (+/- температура, вкл/выкл)
- * - ШИМ управление с периодом 1 секунда (0-100% заполнения)
- * - Реализация на ESP32 с использованием FreeRTOS для обработки кнопок
- */
+// ============================================================================
+// Heat-Chamber.ino - ПИД-регулятор температуры с графическим дисплеем и WEB
+// ============================================================================
 
-// ====================== БИБЛИОТЕКИ ======================
-#include <OneWire.h>            // Для работы с датчиками DS18B20
-#include <DallasTemperature.h>  // Для чтения температуры
-#include <U8g2lib.h>            // Графическая библиотека для дисплея
-#include <GyverButton.h>        // Удобная работа с кнопками
-#include <uPID.h>               // ПИД-регулятор (замена GyverPID)
-#include <driver/ledc.h>        // Аппаратный ШИМ (LEDC) для ESP32
+#include <OneWire.h>
+#include <DallasTemperature.h>
+#include <U8g2lib.h>
+#include <GyverButton.h>
+#include <uPID.h>
 
-// ====================== КОНФИГУРАЦИЯ АППАРАТУРЫ ======================
-// Пиновая конфигурация для ESP32 mini D1
-#define HEATER_PIN 25    // Пин управления нагревателем (ШИМ)
-#define ONE_WIRE_BUS 26  // Пин для датчиков температуры (1-Wire)
-#define BTN_UP_PIN 17    // Кнопка увеличения температуры
-#define BTN_DOWN_PIN 16  // Кнопка уменьшения температуры
-#define BTN_POWER_PIN 2  // Кнопка вкл/выкл системы
+#include "config.h"
+#include "pwm.h"
+#include "sensors_core.h"
+#include "display_graph.h"
+#include "display_ui.h"
+#include "rtos_buttons.h"
+#include "wifi_webserver.h"
+#include "web_interface.h"
+#include "network.h"
 
-// Параметры системы
-#define MAX_TEMP 70.0f             // Максимальная допустимая температура (°C)
-#define PID_INTERVAL 1000          // Интервал обновления ПИД (мс)
-#define TEMP_UPDATE_INTERVAL 1000  // Интервал обновления температуры (мс)
+// ============================================================================
+// ОБЪЕКТЫ
+// ============================================================================
+U8G2_ST7920_128X64_F_HW_SPI u8g2(U8G2_R0, 5, U8X8_PIN_NONE);
+OneWire oneWire(ONE_WIRE_BUS);
+DallasTemperature sensors(&oneWire);
+GButton btnUp(BTN_UP_PIN);
+GButton btnDown(BTN_DOWN_PIN);
+GButton btnPower(BTN_POWER_PIN);
 
-// ====================== НАСТРОЙКИ ГРАФИКОВ ======================
-// const int GRAPH_START_X = 67;                             // Начало графика по X (пиксели)
-const int GRAPH_START_X = 47;                             // Начало графика по X (пиксели)
-const int GRAPH_END_X = 127;                              // Конец графика по X
-const int GRAPH_WIDTH = GRAPH_END_X - GRAPH_START_X + 1;  // Ширина графика
-
-// Интервалы обновления графиков
-// const long GRAPH_SHIFT_INTERVAL_MS = 1875;  // Интервал сдвига графика график 2.5 мин
-// const long GRAPH_SHIFT_INTERVAL_MS = 3750;  // Интервал сдвига графика график 5 мин
-// const long GRAPH_SHIFT_INTERVAL_MS = 7500;  // Интервал сдвига графика график 10 мин
-const long GRAPH_SHIFT_INTERVAL_MS = 22500;  // Интервал сдвига графика график 30 мин
-
-const long GRAPH_DRAW_INTERVAL_MS = 1000;    // Интервал отрисовки графика (1 сек)
-
-// Буферы истории для графиков
-int targetHistory[GRAPH_WIDTH] = { 0 };       // История значений уставки
-float sensorHistory[3][GRAPH_WIDTH] = { 0 };  // История значений датчиков (3 датчика)
-
-// ====================== НАСТРОЙКИ ШИМ ======================
-#define PWM_FREQ_HZ 1                       // Частота ШИМ 1 Гц (период 1 сек)
-#define PWM_RESOLUTION 10                   // Разрешение ШИМ (10 бит = 0-1023)
-#define PWM_CHANNEL LEDC_CHANNEL_0          // Канал ШИМ
-#define PWM_TIMER LEDC_TIMER_0              // Таймер ШИМ
-#define MAX_DUTY (1 << PWM_RESOLUTION) - 1  // Максимальное значение заполнения (1023)
-
-// ====================== ОБЪЕКТЫ И ПЕРЕМЕННЫЕ ======================
-U8G2_ST7920_128X64_F_HW_SPI u8g2(U8G2_R0, 5, U8X8_PIN_NONE);  // Дисплей ST7920
-OneWire oneWire(ONE_WIRE_BUS);                                // Шина 1-Wire
-DallasTemperature sensors(&oneWire);                          // Датчики температуры
-GButton btnUp(BTN_UP_PIN);                                    // Кнопка "+"
-GButton btnDown(BTN_DOWN_PIN);                                // Кнопка "-"
-GButton btnPower(BTN_POWER_PIN);                              // Кнопка питания
-
-// ПИД-регулятор с настройками:
-// Режим: дифференцирование по входу (D_INPUT) + антивиндап (I_SATURATE)
-// Начальные коэффициенты: Kp=7.0, Ki=0.4, Kd=1.2
+// ПИД-регулятор
 uPID PIDregulator(D_INPUT | I_SATURATE, PID_INTERVAL);
 
-// Системные переменные
-float targetTemp = 30.0;           // Целевая температура (°C)
-bool systemState = false;          // Состояние системы (вкл/выкл)
-DeviceAddress sensorAddresses[3];  // Адреса датчиков температуры
-uint8_t sensorCount = 0;           // Количество найденных датчиков
-float sensorTemps[3] = { 0 };      // Текущие показания датчиков
-unsigned long startMillis = 0;     // Время старта системы
-TaskHandle_t buttonsTaskHandle;    // Дескриптор задачи обработки кнопок
+// ============================================================================
+// ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ
+// ============================================================================
+float targetTemp = 30.0;                // Целевая температура
+bool systemState = false;               // Вкл/Выкл
+DeviceAddress sensorAddresses[MAX_SENSORS];
+uint8_t sensorCount = 0;
+float sensorTemps[MAX_SENSORS] = { 0 };
+unsigned long startMillis = 0;
 
-// Таймеры для управления системой
-unsigned long lastTempUpdate = 0;  // Время последнего обновления температуры
-unsigned long lastPIDUpdate = 0;   // Время последнего обновления ПИД
-unsigned long lastGraphShift = 0;  // Время последнего сдвига графика
-unsigned long lastGraphDraw = 0;   // Время последней отрисовки графика
+// Режимы и цвета (для WEB)
+int currentMode = 1;                     // 0 - стабилизация, 1 - рабочий
+int currentColor = 0;                     // 0 - зеленый, 1 - желтый, 2 - красный
+float baseTemp = 30.0;                    // Базовая температура для режима 2
 
-// ====================== НАСТРОЙКА ШИМ ======================
-void setupPWM() {
-  // Конфигурация таймера ШИМ
-  ledc_timer_config_t timer_conf = {
-    .speed_mode = LEDC_LOW_SPEED_MODE,
-    .duty_resolution = (ledc_timer_bit_t)PWM_RESOLUTION,
-    .timer_num = PWM_TIMER,
-    .freq_hz = PWM_FREQ_HZ,
-    .clk_cfg = LEDC_AUTO_CLK
-  };
-  ledc_timer_config(&timer_conf);
+TaskHandle_t buttonsTaskHandle;
+TaskHandle_t wifiTaskHandle;
 
-  // Конфигурация канала ШИМ
-  ledc_channel_config_t channel_conf = {
-    .gpio_num = HEATER_PIN,
-    .speed_mode = LEDC_LOW_SPEED_MODE,
-    .channel = PWM_CHANNEL,
-    .intr_type = LEDC_INTR_DISABLE,
-    .timer_sel = PWM_TIMER,
-    .duty = 0,  // Начальное заполнение 0%
-    .hpoint = 0
-  };
-  ledc_channel_config(&channel_conf);
+// Буферы графиков
+int targetHistory[GRAPH_WIDTH] = { 0 };
+float sensorHistory[MAX_SENSORS][GRAPH_WIDTH] = { 0 };
+
+// Таймеры
+unsigned long lastTempUpdate = 0;
+unsigned long lastPIDUpdate = 0;
+unsigned long lastGraphShift = 0;
+unsigned long lastGraphDraw = 0;
+unsigned long lastWebSend = 0;
+
+// ============================================================================
+// КОЛБЭКИ ДЛЯ WEB
+// ============================================================================
+void onSetTarget(float value) {
+  targetTemp = constrain(value, 0, MAX_TEMP);
+  PIDregulator.setpoint = targetTemp;
 }
 
-// ====================== ФУНКЦИЯ СДВИГА ГРАФИКА ======================
-void shiftGraphLeft() {
-  // Сдвигаем историю уставки на одну позицию влево
-  for (int i = 0; i < GRAPH_WIDTH - 1; i++) {
-    targetHistory[i] = targetHistory[i + 1];
-  }
-
-  // Сдвигаем историю датчиков на одну позицию влево
-  for (int j = 0; j < 3; j++) {
-    for (int i = 0; i < GRAPH_WIDTH - 1; i++) {
-      sensorHistory[j][i] = sensorHistory[j][i + 1];
-    }
-  }
-
-  // Добавляем новые данные в конец массивов
-  targetHistory[GRAPH_WIDTH - 1] = (int)targetTemp;  // Последнее значение уставки
-  for (int j = 0; j < 3; j++) {
-    sensorHistory[j][GRAPH_WIDTH - 1] = sensorTemps[j];  // Последние значения датчиков
+void onSetPower(bool state) {
+  systemState = state;
+  if (systemState) {
+    startMillis = millis();
+  } else {
+    heaterOff();
   }
 }
 
-// ====================== ОТРИСОВКА ГРАФИКОВ ======================
-void drawGraphs() {
-  // Проходим по всем точкам графика
-  for (int x = 0; x < GRAPH_WIDTH; x++) {
-    int displayX = x + GRAPH_START_X;  // Вычисляем позицию по X
-
-    // Отрисовка уставки (синяя линия)
-    int y = map(targetHistory[x], 10, 70, 63, 0);  // Преобразуем температуру в координату Y
-    y = constrain(y, 0, 63) + 10;                  // Ограничиваем и смещаем от верха
-    u8g2.drawPixel(displayX, y);                   // Рисуем точку
-
-    // Отрисовка данных датчиков
-    for (int j = 0; j < 3; j++) {
-      if (!isnan(sensorHistory[j][x])) {              // Если данные валидны
-        y = map(sensorHistory[j][x], 10, 70, 63, 0);  // Преобразуем температуру
-        y = constrain(y, 0, 63) + 10;                 // Ограничиваем и смещаем
-        u8g2.drawPixel(displayX, y);                  // Рисуем точку
-      }
-    }
-  }
+void onSetPID(float Kp, float Ki, float Kd) {
+  PIDregulator.Kp = Kp;
+  PIDregulator.Ki = Ki;
+  PIDregulator.Kd = Kd;
 }
 
-// ====================== НАСТРОЙКА СИСТЕМЫ ======================
+void onReset() {
+  restartESP("WEB команда");
+}
+
+// ============================================================================
+// SETUP
+// ============================================================================
 void setup() {
   Serial.begin(115200);
+  delay(1000);
+  Serial.println("\n\n=== Heat Chamber v2.0 ===");
 
-  // Настройка дисплея
+  // Дисплей
   u8g2.begin();
   u8g2.clearBuffer();
   u8g2.setFont(u8g2_font_6x10_tf);
-  u8g2.drawStr(0, 10, "Initializing...");
+  u8g2.drawStr(0, 10, "Starting...");
   u8g2.sendBuffer();
 
-  // Настройка кнопок
-  btnUp.setDebounce(50);  // Установка антидребезга 50 мс
+  // Кнопки (настройка пинов)
+  btnUp.setDebounce(50);
   btnDown.setDebounce(50);
   btnPower.setDebounce(50);
   pinMode(BTN_UP_PIN, INPUT_PULLUP);
   pinMode(BTN_DOWN_PIN, INPUT_PULLUP);
   pinMode(BTN_POWER_PIN, INPUT_PULLUP);
 
-  // Настройка ШИМ
+  // ШИМ
   setupPWM();
-  ledc_set_duty(LEDC_LOW_SPEED_MODE, PWM_CHANNEL, 0);
-  ledc_update_duty(LEDC_LOW_SPEED_MODE, PWM_CHANNEL);
+  heaterOff();
 
-  // Инициализация датчиков температуры
-  sensors.begin();
-  sensorCount = sensors.getDeviceCount();
+  // Датчики
+  sensorCount = initSensors(&sensors, sensorAddresses);
+  Serial.printf("Датчиков найдено: %d\n", sensorCount);
 
-  // Настройка найденных датчиков
-  for (uint8_t i = 0; i < min<uint8_t>(sensorCount, 3); i++) {
-    if (sensors.getAddress(sensorAddresses[i], i)) {
-      sensors.setResolution(sensorAddresses[i], 12);  // Установка максимального разрешения
-    }
-  }
+  // ПИД
+  PIDregulator.Kp = PID_KP;
+  PIDregulator.Ki = PID_KI;
+  PIDregulator.Kd = PID_KD;
+  PIDregulator.setpoint = targetTemp;
+  PIDregulator.outMax = MAX_DUTY / 2;
+  PIDregulator.outMin = 0;
 
-  // Настройка ПИД-регулятора
-  PIDregulator.Kp = 7.0;               // Пропорциональный коэффициент
-  PIDregulator.Ki = 0.4;               // Интегральный коэффициент
-  PIDregulator.Kd = 1.2;               // Дифференциальный коэффициент
-  PIDregulator.setpoint = targetTemp;  // Установка уставки
-  PIDregulator.outMax = MAX_DUTY / 2;  // Ограничение максимального выхода
-  PIDregulator.outMin = 0;             // Ограничение минимального выхода
+  // Инициализация графиков
+  initGraphBuffers(targetHistory, sensorHistory, targetTemp, MAX_SENSORS);
 
-  // Создание задачи FreeRTOS для обработки кнопок (выполняется на ядре 0)
-  xTaskCreatePinnedToCore(
-    buttonsTask,         // Функция задачи
-    "buttonsTask",       // Имя задачи
-    2048,                // Размер стека
-    NULL,                // Параметры
-    1,                   // Приоритет
-    &buttonsTaskHandle,  // Дескриптор задачи
-    0                    // Ядро процессора
+  // ==========================================================================
+  // НАСТРОЙКА КОЛБЭКОВ ДЛЯ WEB
+  // ==========================================================================
+  WebCallbacks callbacks;
+  callbacks.onSetTarget = onSetTarget;
+  callbacks.onSetPower = onSetPower;
+  callbacks.onSetPID = onSetPID;
+  callbacks.onReset = onReset;
+  
+  initWebInterface(callbacks);
+
+  // ==========================================================================
+  // ЗАПУСК ЗАДАЧ FREERTOS
+  // ==========================================================================
+  
+  // Задача кнопок (ядро 0)
+  buttonsTaskHandle = createButtonsTask(
+    &btnUp, &btnDown, &btnPower,
+    &targetTemp, &systemState, &startMillis,
+    MAX_TEMP,
+    [](float newTarget) { PIDregulator.setpoint = newTarget; }
   );
 
-  // Инициализация графиков начальными значениями
-  for (int i = 0; i < GRAPH_WIDTH; i++) {
-    targetHistory[i] = targetTemp;
-    for (int j = 0; j < 3; j++) {
-      sensorHistory[j][i] = 0;
-    }
-  }
+  // Задача WiFi (ядро 1)
+  xTaskCreatePinnedToCore(
+    taskWiFi, "wifiTask", 4096, NULL, 1, &wifiTaskHandle, 1
+  );
 
-  startMillis = millis();  // Запоминаем время старта
+  startMillis = millis();
+  Serial.println("Система готова");
 }
 
-// ====================== ОСНОВНОЙ ЦИКЛ ======================
+// ============================================================================
+// LOOP
+// ============================================================================
 void loop() {
-  unsigned long currentMillis = millis();
+  unsigned long now = millis();
 
-  // 1. Обновление температуры (раз в секунду)
-  if (currentMillis - lastTempUpdate >= TEMP_UPDATE_INTERVAL) {
-    lastTempUpdate = currentMillis;
-    sensors.requestTemperatures();  // Запрос температуры со всех датчиков
+  // 1. Чтение температуры
+  if (now - lastTempUpdate >= TEMP_UPDATE_INTERVAL) {
+    lastTempUpdate = now;
+    requestTemperatures(&sensors);
 
-    // Чтение температуры с каждого датчика
-    for (uint8_t i = 0; i < min<uint8_t>(sensorCount, 3); i++) {
-      float temp = sensors.getTempC(sensorAddresses[i]);
-      sensorTemps[i] = (temp == DEVICE_DISCONNECTED_C) ? NAN : temp;
+    for (uint8_t i = 0; i < min(sensorCount, (uint8_t)MAX_SENSORS); i++) {
+      sensorTemps[i] = readTemperature(&sensors, sensorAddresses, i);
     }
   }
 
-  // 2. Обновление ПИД и ШИМ (раз в PID_INTERVAL мс)
-  if (currentMillis - lastPIDUpdate >= PID_INTERVAL) {
-    lastPIDUpdate = currentMillis;
+  // 2. ПИД и управление нагревателем
+  if (now - lastPIDUpdate >= PID_INTERVAL) {
+    lastPIDUpdate = now;
 
-    if (systemState && !isnan(sensorTemps[0])) {
-      // Вычисляем выход ПИД-регулятора
-      float pidOutput = PIDregulator.compute(sensorTemps[0]);
-
-      // Преобразуем выход ПИД в значение ШИМ (0-MAX_DUTY)
-      uint32_t duty = (uint32_t)pidOutput * 2;
-      duty = constrain(duty, 0, MAX_DUTY);
-
-      // Устанавливаем заполнение ШИМ
-      ledc_set_duty(LEDC_LOW_SPEED_MODE, PWM_CHANNEL, duty);
-      ledc_update_duty(LEDC_LOW_SPEED_MODE, PWM_CHANNEL);
+    if (systemState && isValidTemperature(sensorTemps[0])) {
+      float pidOut = PIDregulator.compute(sensorTemps[0]);
+      float power = (pidOut / (MAX_DUTY / 2)) * 100.0;
+      setHeaterPower(power);
     } else {
-      // Если система выключена или ошибка датчика - выключаем нагрев
-      ledc_set_duty(LEDC_LOW_SPEED_MODE, PWM_CHANNEL, 0);
-      ledc_update_duty(LEDC_LOW_SPEED_MODE, PWM_CHANNEL);
+      heaterOff();
     }
   }
 
-  // 3. Управление графиками (сдвиг раз в 10 секунд)
-  if (currentMillis - lastGraphShift >= GRAPH_SHIFT_INTERVAL_MS) {
-    lastGraphShift = currentMillis;
-    shiftGraphLeft();  // Сдвигаем графики влево
+  // 3. Сдвиг графиков
+  if (now - lastGraphShift >= GRAPH_SHIFT_INTERVAL_MS) {
+    lastGraphShift = now;
+    shiftGraphsLeft(targetHistory, sensorHistory, targetTemp, sensorTemps, MAX_SENSORS);
   }
 
-  // 4. Обновление интерфейса (раз в секунду)
-  if (currentMillis - lastGraphDraw >= GRAPH_DRAW_INTERVAL_MS) {
-    lastGraphDraw = currentMillis;
-    drawInterface();  // Отрисовываем интерфейс
+  // 4. Отрисовка интерфейса на дисплее
+  if (now - lastGraphDraw >= GRAPH_DRAW_INTERVAL_MS) {
+    lastGraphDraw = now;
+    drawInterface(
+      &u8g2, startMillis, targetTemp, systemState,
+      sensorTemps, sensorCount,
+      targetHistory, sensorHistory, MAX_SENSORS
+    );
   }
 
-}
-
-// ====================== ЗАДАЧА ОБРАБОТКИ КНОПОК (FreeRTOS) ======================
-void buttonsTask(void* pvParameters) {
-  for (;;) {
-    // Обработка состояний кнопок
-    btnUp.tick();
-    btnDown.tick();
-    btnPower.tick();
-
-    // Обработка нажатия кнопки питания
-    if (btnPower.isClick()) {
-      systemState = !systemState;  // Переключаем состояние системы
-      if (systemState) {
-        startMillis = millis();  // Сбрасываем таймер при включении
-      }
-    }
-
-    // Обработка кнопки увеличения температуры
-    if (btnUp.isClick() && targetTemp < MAX_TEMP) {
-      targetTemp += 1.0;
-      PIDregulator.setpoint = targetTemp;  // Обновляем уставку ПИД
-    }
-
-    // Обработка кнопки уменьшения температуры
-    if (btnDown.isClick() && targetTemp > 0) {
-      targetTemp -= 1.0;
-      PIDregulator.setpoint = targetTemp;  // Обновляем уставку ПИД
-    }
-
-    vTaskDelay(pdMS_TO_TICKS(10));  // Задержка для снижения нагрузки
-  }
-}
-
-// ====================== ОБНОВЛЕНИЕ ИНТЕРФЕЙСА ======================
-void drawInterface() {
-  u8g2.clearBuffer();  // Очищаем буфер дисплея
-
-  // 1. Отображение времени работы системы
-  u8g2.setFont(u8g2_font_6x10_tf);
-  unsigned long elapsed = millis() - startMillis;
-  uint8_t hours = (elapsed / 3600000) % 100;
-  uint8_t minutes = (elapsed / 60000) % 60;
-  uint8_t seconds = (elapsed / 1000) % 60;
-  char timeStr[9];
-  sprintf(timeStr, "%02u:%02u:%02u", hours, minutes, seconds);
-  u8g2.drawStr(80, 8, timeStr);
-
-  // 2. Отображение целевой температуры и статуса системы
-  u8g2.setFont(u8g2_font_gb24st_t_3);  // Большой шрифт для температуры
-  char tempStr[10];
-  dtostrf(targetTemp, 2, 0, tempStr);  // Преобразуем float в строку
-  u8g2.drawStr(0, 15, tempStr);
-
-  u8g2.setFont(u8g2_font_6x10_tf);  // Меньший шрифт для статуса
-  u8g2.drawStr(25, 8, systemState ? "===ON===" : "   OFF");
-
-  // 3. Отображение температур с датчиков
-  u8g2.setFont(u8g2_font_gb24st_t_3);
-  for (uint8_t i = 0; i < min<uint8_t>(sensorCount, 3); i++) {
-    if (!isnan(sensorTemps[i])) {
-      dtostrf(sensorTemps[i], 4, 1, tempStr);  // Форматируем температуру
-      u8g2.drawStr(0, 15 * (i + 2), tempStr);  // Выводим с отступом
-    } else {
-      u8g2.drawStr(0, 15 * (i + 2), "Err");  // Ошибка датчика
+  // 5. Отправка данных веб-клиентам (раз в секунду)
+  if (now - lastWebSend >= 1000) {
+    lastWebSend = now;
+    
+    if (isWebClientConnected()) {
+      // Формируем время ЧЧ:ММ
+      unsigned long elapsed = millis() - startMillis;
+      uint8_t hours = (elapsed / 3600000) % 100;
+      uint8_t minutes = (elapsed / 60000) % 60;
+      char timeStr[6];
+      snprintf(timeStr, sizeof(timeStr), "%02u:%02u", hours, minutes);
+      
+      sendWebData(
+        sensorTemps[3],      // гильза
+        sensorTemps[0],      // 100см
+        sensorTemps[1],      // 75см
+        sensorTemps[2],      // 50см
+        currentMode,
+        currentColor,
+        timeStr,
+        baseTemp
+      );
     }
   }
-
-  // 4. Отрисовка графиков температур
-  drawGraphs();
-
-  u8g2.sendBuffer();  // Отправляем буфер на дисплей
 }
