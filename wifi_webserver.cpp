@@ -2,11 +2,8 @@
 // wifi_webserver.cpp - Реализация WiFi, WebSocket и веб-сервера
 // ============================================================================
 
-#include "wifi_webserver.h"
-#include "web_interface.h"
+#include "wifi_webserver.h"  // этот файл уже включает всё в правильном порядке
 #include <WiFi.h>
-#include <DNSServer.h>
-#include <WiFiManager.h>
 #include <ESPmDNS.h>
 #include <LittleFS.h>
 
