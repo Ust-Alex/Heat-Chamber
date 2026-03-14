@@ -10,6 +10,12 @@
 #define RTOS_TASKS_H
 
 #include <Arduino.h>
+#include <OneWire.h>
+#include <DallasTemperature.h>
+#include <U8g2lib.h>
+#include <GyverButton.h>
+#include <uPID.h>           // <- ДОБАВИЛИ!
+
 #include "config.h"
 #include "pwm.h"
 #include "sensors_core.h"
@@ -22,6 +28,7 @@
 // ВНЕШНИЕ ПЕРЕМЕННЫЕ (из main ino)
 // ============================================================================
 extern U8G2_ST7920_128X64_F_HW_SPI u8g2;
+extern OneWire oneWire;                         // <- ДОБАВИЛИ!
 extern DallasTemperature sensors;
 extern DeviceAddress sensorAddresses[MAX_SENSORS];
 extern uint8_t sensorCount;
@@ -31,7 +38,7 @@ extern bool systemState;
 extern unsigned long startMillis;
 extern int targetHistory[GRAPH_WIDTH];
 extern float sensorHistory[MAX_SENSORS][GRAPH_WIDTH];
-extern uPID PIDregulator;
+extern uPID PIDregulator;                        // <- ТЕПЕРЬ УВИДИТ!
 
 extern unsigned long lastGraphShift;
 extern unsigned long lastGraphDraw;

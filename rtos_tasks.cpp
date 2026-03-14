@@ -7,22 +7,23 @@
 // ============================================================================
 // ВНЕШНИЕ ПЕРЕМЕННЫЕ (определены в основном файле)
 // ============================================================================
-U8G2_ST7920_128X64_F_HW_SPI u8g2(U8G2_R0, 5, U8X8_PIN_NONE);
-DallasTemperature sensors(&oneWire);
-DeviceAddress sensorAddresses[MAX_SENSORS];
-uint8_t sensorCount = 0;
-float sensorTemps[MAX_SENSORS] = { 0 };
-float targetTemp = 30.0;
-bool systemState = false;
-unsigned long startMillis = 0;
-int targetHistory[GRAPH_WIDTH] = { 0 };
-float sensorHistory[MAX_SENSORS][GRAPH_WIDTH] = { 0 };
-uPID PIDregulator(D_INPUT | I_SATURATE, PID_INTERVAL);
+extern U8G2_ST7920_128X64_F_HW_SPI u8g2;
+extern OneWire oneWire;
+extern DallasTemperature sensors;
+extern DeviceAddress sensorAddresses[MAX_SENSORS];
+extern uint8_t sensorCount;
+extern float sensorTemps[MAX_SENSORS];
+extern float targetTemp;
+extern bool systemState;
+extern unsigned long startMillis;
+extern int targetHistory[GRAPH_WIDTH];
+extern float sensorHistory[MAX_SENSORS][GRAPH_WIDTH];
+extern uPID PIDregulator;
 
-unsigned long lastGraphShift = 0;
-unsigned long lastGraphDraw = 0;
-unsigned long lastTempUpdate = 0;
-unsigned long lastPIDUpdate = 0;
+extern unsigned long lastGraphShift;
+extern unsigned long lastGraphDraw;
+extern unsigned long lastTempUpdate;
+extern unsigned long lastPIDUpdate;
 
 TaskHandle_t buttonsTaskHandle;
 TaskHandle_t webTaskHandle;
