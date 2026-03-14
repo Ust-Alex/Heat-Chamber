@@ -95,7 +95,7 @@ void setup() {
   // --------------------------------------------------------------------------
   // [1] ДИСПЛЕЙ
   // --------------------------------------------------------------------------
-  Serial.print(F("[1/12] Display init ... "));
+  Serial.print(F("[1/13] Display init ... "));
   u8g2.begin();
   u8g2.clearBuffer();
   u8g2.setFont(u8g2_font_6x10_tf);
@@ -106,7 +106,7 @@ void setup() {
   // --------------------------------------------------------------------------
   // [2] КНОПКИ
   // --------------------------------------------------------------------------
-  Serial.print(F("[2/12] Buttons init ... "));
+  Serial.print(F("[2/13] Buttons init ... "));
   btnUp.setDebounce(50);
   btnDown.setDebounce(50);
   btnPower.setDebounce(50);
@@ -118,34 +118,44 @@ void setup() {
   // --------------------------------------------------------------------------
   // [3] ДАТЧИКИ
   // --------------------------------------------------------------------------
-  Serial.print(F("[3/12] Sensors init ... "));
+  Serial.print(F("[3/13] Sensors init ... "));
   sensorCount = initSensors(&sensors, sensorAddresses);
   Serial.print(sensorCount);
   Serial.println(F(" found"));
 
   // --------------------------------------------------------------------------
-  // [4] ПИД
+  // [4] ШИМ (инициализация здесь, а не в отдельной задаче!)
   // --------------------------------------------------------------------------
-  Serial.print(F("[4/12] PID init ... "));
+  Serial.print(F("[4/13] PWM init ... "));
+  setupPWM();
+  // Сразу выключаем для безопасности
+  ledc_set_duty(LEDC_HIGH_SPEED_MODE, LEDC_CHANNEL_0, 0);
+  ledc_update_duty(LEDC_HIGH_SPEED_MODE, LEDC_CHANNEL_0);
+  Serial.println(F("OK"));
+
+  // --------------------------------------------------------------------------
+  // [5] ПИД
+  // --------------------------------------------------------------------------
+  Serial.print(F("[5/13] PID init ... "));
   PIDregulator.Kp = PID_KP;
   PIDregulator.Ki = PID_KI;
   PIDregulator.Kd = PID_KD;
   PIDregulator.setpoint = targetTemp;
-  PIDregulator.outMax = MAX_DUTY / 2;
+  PIDregulator.outMax = 4096;  // Половина от 8192 для запаса
   PIDregulator.outMin = 0;
   Serial.println(F("OK"));
 
   // --------------------------------------------------------------------------
-  // [5] ГРАФИКИ
+  // [6] ГРАФИКИ
   // --------------------------------------------------------------------------
-  Serial.print(F("[5/12] Graph buffers init ... "));
+  Serial.print(F("[6/13] Graph buffers init ... "));
   initGraphBuffers(targetHistory, sensorHistory, targetTemp, MAX_SENSORS);
   Serial.println(F("OK"));
 
   // --------------------------------------------------------------------------
-  // [6] WiFi
+  // [7] WiFi
   // --------------------------------------------------------------------------
-  Serial.print(F("[6/12] WiFi init ... "));
+  Serial.print(F("[7/13] WiFi init ... "));
   if (initWiFi()) {
     Serial.println(F("CONNECTED"));
   } else {
@@ -153,30 +163,30 @@ void setup() {
   }
 
   // --------------------------------------------------------------------------
-  // [7] mDNS
+  // [8] mDNS
   // --------------------------------------------------------------------------
-  Serial.print(F("[7/12] mDNS init ... "));
+  Serial.print(F("[8/13] mDNS init ... "));
   initMDNS();
   Serial.println(F("OK"));
 
   // --------------------------------------------------------------------------
-  // [8] HTTP-СЕРВЕР
+  // [9] HTTP-СЕРВЕР
   // --------------------------------------------------------------------------
-  Serial.print(F("[8/12] HTTP server init ... "));
+  Serial.print(F("[9/13] HTTP server init ... "));
   initWebServer();
   Serial.println(F("OK"));
 
   // --------------------------------------------------------------------------
-  // [9] WEBSOCKET
+  // [10] WEBSOCKET
   // --------------------------------------------------------------------------
-  Serial.print(F("[9/12] WebSocket init ... "));
+  Serial.print(F("[10/13] WebSocket init ... "));
   initWebSocket();
   Serial.println(F("OK"));
 
   // --------------------------------------------------------------------------
-  // [10] WEB-ИНТЕРФЕЙС
+  // [11] WEB-ИНТЕРФЕЙС
   // --------------------------------------------------------------------------
-  Serial.print(F("[10/12] Web callbacks init ... "));
+  Serial.print(F("[11/13] Web callbacks init ... "));
   WebCallbacks callbacks;
   callbacks.onSetTarget = onSetTarget;
   callbacks.onSetPower = onSetPower;
@@ -188,9 +198,19 @@ void setup() {
   startMillis = millis();
 
   // --------------------------------------------------------------------------
-  // [11] ЗАДАЧИ FREERTOS (через новый модуль)
+  // [12] ЗАДАЧИ FREERTOS
   // --------------------------------------------------------------------------
   createAllTasks(&btnUp, &btnDown, &btnPower, &targetTemp, &systemState, &startMillis);
+
+  // --------------------------------------------------------------------------
+  // [13] ПРОВЕРКА ШИМ
+  // --------------------------------------------------------------------------
+  Serial.print(F("[13/13] PWM test ... "));
+  // Короткий тест: 1% на 100мс для проверки
+  setHeaterPower(1.0);
+  delay(100);
+  setHeaterPower(0.0);
+  Serial.println(F("OK"));
 
   // --------------------------------------------------------------------------
   // ФИНАЛ

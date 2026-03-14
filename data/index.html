@@ -3,7 +3,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Heat Chamber</title>
+    <title>Термический реформинг</title>
     
     <!-- Chart.js -->
     <script src="chart.umd.min.js"></script>
@@ -17,75 +17,92 @@
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <!-- Верхняя панель (режим и время) -->
+    <!-- ============================================ -->
+    <!-- ВЕРХНЯЯ ПАНЕЛЬ -->
+    <!-- ============================================ -->
     <div class="window window-header" id="windowHeader">
-        <div class="mode-bar mode0" id="modeDisplay">
-            MODE 1 (СТАБИЛИЗАЦИЯ) 00:00
-        </div>
-    </div>
-
-    <!-- Левая панель управления -->
-    <div class="window window-left" id="windowLeft">
-        <div class="left-panel">
-            <!-- Карточки температур -->
-            <div class="temp-card" id="card3" style="color: #FFA500;">--.--</div>  <!-- 100см -->
-            <div class="temp-card" id="card2" style="color: #00FFFF;">--.--</div>  <!-- 75см -->
-            <div class="temp-card" id="card1" style="color: #FFFF00;">--.--</div>  <!-- 50см -->
-            <div class="temp-card" id="card0" style="color: #00FF00;">--.--</div>  <!-- Гильза -->
-            
-            <!-- Кнопки масштаба графика -->
-            <button class="scale-btn" id="btn30m" data-range="30м">30м</button>
-            <button class="scale-btn active" id="btn15m" data-range="15м">15м</button>
-            <button class="scale-btn" id="btn5m" data-range="5м">5м</button>
-            <button class="scale-btn" id="btn1m" data-range="1м">1м</button>
-            
-            <!-- Дополнительные кнопки управления (НОВЫЕ) -->
-            <button class="action-btn" id="btnPower" style="background: #4CAF50;">ВКЛ</button>
-            <button class="action-btn" id="btnSetTarget">Уставка</button>
-            
-            <!-- Нижний блок -->
-            <div class="panel-bottom">
-                <div class="panel-range-item">
-                    <label>до</label>
-                    <input type="number" id="maxTemp" value="70.0" step="0.1" min="0.0" max="100.0">
-                </div>
-                <div class="panel-range-item">
-                    <label>от</label>
-                    <input type="number" id="minTemp" value="20.0" step="0.1" min="0.0" max="100.0">
-                </div>
-                <div class="panel-target" id="panelTarget">
-                    <span class="target-label">Уставка</span>
-                    <span class="target-value" id="targetValue">30.0</span>
-                </div>
-                <div class="panel-status" id="panelStatus">
-                    <span class="panel-status-dot offline" id="panelStatusDot"></span>
-                    <span class="panel-status-text offline" id="panelStatusText">OFF</span>
-                </div>
+        <div class="top-bar">
+            <div class="top-left">Термический реформинг</div>
+            <div class="top-center" id="topSetpoint">45.0°C</div>
+            <div class="top-right">
+                <span class="top-time" id="topTime">00:00</span>
+                <span class="wifi-dot" id="wifiDot"></span>
             </div>
         </div>
     </div>
 
-    <!-- Окно графика -->
-    <div class="window window-graph" id="windowGraph">
-        <canvas id="tempChart"></canvas>
-    </div>
-
-    <!-- Нижняя панель (отладка) -->
-    <div class="window window-debug" id="windowDebug">
-        <div class="debug-bar" id="debugBar">
-            <span>Буфер: <span class="debug-value" id="debugBuffer">0/7200</span></span>
-            <span>Диапазон: <span class="debug-value" id="debugRange">120</span></span>
-            <span>Активна: <span class="debug-value" id="debugActive">15м</span></span>
-            <span>IP: <span class="debug-value" id="debugIP">--.---.--.--</span></span>
+    <!-- ============================================ -->
+    <!-- ЛЕВАЯ ПАНЕЛЬ УПРАВЛЕНИЯ -->
+    <!-- ============================================ -->
+    <div class="window window-left" id="windowLeft">
+        <div class="left-panel">
+            
+            <!-- Температуры датчиков (3 штуки, только цифры) -->
+            <div class="sensor-temp" id="sensor1" style="color: #00FF00;">--.-</div>
+            <div class="sensor-temp" id="sensor2" style="color: #FFFF00;">--.-</div>
+            <div class="sensor-temp" id="sensor3" style="color: #FFA500;">--.-</div>
+            
+            <!-- Кнопка ВКЛ/ВЫКЛ -->
+            <button class="power-btn" id="btnPower">ВКЛ</button>
+            
+            <!-- Установка температуры -->
+            <div class="setpoint-block">
+                <div class="setpoint-label">Уставка</div>
+                <input type="number" id="setpointInput" value="45.0" step="0.5" min="40.0" max="70.0">
+            </div>
+            
+            <!-- Мощность нагрева -->
+            <div class="power-block">
+                <div class="power-label">Мощность</div>
+                <div class="power-value" id="powerValue">0.0% (0)</div>
+            </div>
+            
+            <!-- Таймер работы -->
+            <div class="timer-block">
+                <div class="timer-label">Время</div>
+                <div class="timer-value" id="timerValue">00:00</div>
+            </div>
+            
+            <!-- WiFi индикатор (дубль на всякий случай, но основной уже вверху) -->
+            <div class="wifi-block">
+                <span class="wifi-dot" id="wifiDotLeft"></span>
+                <span class="wifi-text" id="wifiText">WiFi</span>
+            </div>
         </div>
     </div>
 
-    <!-- Модальное окно для ввода уставки -->
-    <div id="targetModal" class="modal">
+    <!-- ============================================ -->
+    <!-- ОКНО ГРАФИКА -->
+    <!-- ============================================ -->
+    <div class="window window-graph" id="windowGraph">
+        <!-- Кнопки масштаба (внутри окна графика, сверху) -->
+        <div class="graph-toolbar">
+            <button class="scale-btn" data-range="10">10м</button>
+            <button class="scale-btn active" data-range="30">30м</button>
+            <button class="scale-btn" data-range="60">1ч</button>
+            <button class="scale-btn" data-range="180">3ч</button>
+            <button class="scale-btn" data-range="360">6ч</button>
+        </div>
+        <canvas id="tempChart"></canvas>
+    </div>
+
+    <!-- ============================================ -->
+    <!-- НИЖНЯЯ ПАНЕЛЬ (ОТЛАДКА) -->
+    <!-- ============================================ -->
+    <div class="window window-debug" id="windowDebug">
+        <div class="debug-bar">
+            <span>Буфер: <span class="debug-value" id="debugBuffer">0/7200</span></span>
+            <span>Датчики: <span class="debug-value" id="debugSensors">3</span></span>
+            <span>Режим: <span class="debug-value" id="debugMode">Работа</span></span>
+        </div>
+    </div>
+
+    <!-- Модальное окно (оставим на случай, если понадобится) -->
+    <div id="targetModal" class="modal" style="display:none;">
         <div class="modal-content">
             <span class="close">&times;</span>
             <h3>Установка температуры</h3>
-            <input type="number" id="modalTarget" step="0.5" min="0" max="70" value="30.0">
+            <input type="number" id="modalTarget" step="0.5" min="40" max="70" value="45.0">
             <button id="modalSubmit">Применить</button>
         </div>
     </div>

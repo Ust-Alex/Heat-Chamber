@@ -25,8 +25,11 @@ extern unsigned long lastGraphDraw;
 extern unsigned long lastTempUpdate;
 extern unsigned long lastPIDUpdate;
 
-TaskHandle_t buttonsTaskHandle;
-TaskHandle_t webTaskHandle;
+// ============================================================================
+// ДЕСКРИПТОРЫ ЗАДАЧ (extern, т.к. определены в основном файле)
+// ============================================================================
+extern TaskHandle_t buttonsTaskHandle;
+extern TaskHandle_t webTaskHandle;
 
 // ============================================================================
 // ЗАДАЧА: ДИСПЛЕЙ (ядро 0, приоритет 2)
@@ -103,7 +106,7 @@ void taskHeaterControl(void* pvParameters) {
       
       if (systemState && !isnan(sensorTemps[0]) && sensorTemps[0] > 0) {
         float pidOut = PIDregulator.compute(sensorTemps[0]);
-        float power = (pidOut / (MAX_DUTY / 2)) * 100.0;
+        float power = (pidOut / 4096.0) * 100.0;  // 4096 = MAX_DUTY/2
         setHeaterPower(power);
         
         static unsigned long lastDebug = 0;
@@ -119,20 +122,6 @@ void taskHeaterControl(void* pvParameters) {
     
     vTaskDelay(pdMS_TO_TICKS(50));
   }
-}
-
-// ============================================================================
-// ЗАДАЧА: ИНИЦИАЛИЗАЦИЯ ШИМ (ядро 1, приоритет 4 - самоуничтожается)
-// ============================================================================
-void taskPWM_init(void* pvParameters) {
-  Serial.println(F("[PWM] Init task started on core 1, priority 4"));
-  
-  setupPWM();
-  ledc_set_duty(LEDC_LOW_SPEED_MODE, PWM_CHANNEL, 0);
-  ledc_update_duty(LEDC_LOW_SPEED_MODE, PWM_CHANNEL);
-  
-  Serial.println(F("[PWM] Init task completed, self-destructing"));
-  vTaskDelete(NULL);
 }
 
 // ============================================================================
@@ -177,6 +166,7 @@ void createAllTasks(
   // ЗАДАЧА 3: WiFi/ВЕБ (ядро 1, приоритет 3)
   // --------------------------------------------------------------------------
   Serial.print(F("   WiFi task (core 1, prio 3, stack 8192) ... "));
+  // Функция taskWebServer определена в web_server.cpp
   xTaskCreatePinnedToCore(
     taskWebServer, 
     "webTask", 
@@ -188,21 +178,7 @@ void createAllTasks(
   Serial.println(F("OK"));
 
   // --------------------------------------------------------------------------
-  // ЗАДАЧА 4: ШИМ (ядро 1, приоритет 4)
-  // --------------------------------------------------------------------------
-  Serial.print(F("   PWM init task (core 1, prio 4, stack 4096) ... "));
-  xTaskCreatePinnedToCore(
-    taskPWM_init,
-    "pwmTask", 
-    4096,
-    NULL, 
-    4,
-    NULL, 
-    1);
-  Serial.println(F("OK"));
-
-  // --------------------------------------------------------------------------
-  // ЗАДАЧА 5: ДАТЧИКИ (ядро 1, приоритет 3)
+  // ЗАДАЧА 4: ДАТЧИКИ (ядро 1, приоритет 3)
   // --------------------------------------------------------------------------
   Serial.print(F("   Sensor task (core 1, prio 3, stack 4096) ... "));
   xTaskCreatePinnedToCore(
@@ -216,7 +192,7 @@ void createAllTasks(
   Serial.println(F("OK"));
 
   // --------------------------------------------------------------------------
-  // ЗАДАЧА 6: УПРАВЛЕНИЕ НАГРЕВОМ (ядро 1, приоритет 3)
+  // ЗАДАЧА 5: УПРАВЛЕНИЕ НАГРЕВОМ (ядро 1, приоритет 3)
   // --------------------------------------------------------------------------
   Serial.print(F("   Heater task (core 1, prio 3, stack 4096) ... "));
   xTaskCreatePinnedToCore(

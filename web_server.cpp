@@ -139,13 +139,51 @@ bool hasWebClients() {
 }
 
 // ============================================================================
-// ЗАДАЧА FREERTOS
+// ЗАДАЧА FREERTOS - ИСПРАВЛЕННАЯ ВЕРСИЯ С ВЫЗОВОМ sendWebData
 // ============================================================================
 void taskWebServer(void* pvParameters) {
   Serial.println(F("[TASK] WebServer задача запущена"));
   
+  // Доступ к глобальным переменным из .ino файла
+  extern float sensorTemps[MAX_SENSORS];
+  extern float targetTemp;
+  extern bool systemState;
+  extern unsigned long startMillis;
+  
+  uint32_t lastSend = 0;
+  
+  // Вспомогательная функция для формирования строки времени ЧЧ:ММ
+  auto getTimeString = [](unsigned long start) -> const char* {
+    static char timeStr[6] = "00:00";
+    if (start == 0) return "00:00";
+    
+    unsigned long elapsed = (millis() - start) / 60000; // минуты
+    unsigned long hours = elapsed / 60;
+    unsigned long minutes = elapsed % 60;
+    snprintf(timeStr, sizeof(timeStr), "%02lu:%02lu", hours, minutes);
+    return timeStr;
+  };
+  
   while (1) {
     webSocket.loop();
+    
+    uint32_t now = millis();
+    // Отправляем данные раз в секунду, если есть клиенты
+    if (now - lastSend >= 1000) {
+      if (isWebClientConnected()) { // Используем готовую функцию проверки
+        // Вызываем готовую функцию отправки с актуальными данными!
+        sendWebData(
+          sensorTemps[0],      // t0
+          sensorTemps[1],      // t1
+          sensorTemps[2],      // t2
+          targetTemp,          // target
+          systemState,         // state
+          getTimeString(startMillis) // timeStr
+        );
+      }
+      lastSend = now;
+    }
+    
     vTaskDelay(pdMS_TO_TICKS(10));
   }
 }

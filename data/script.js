@@ -1,24 +1,32 @@
 // ============================================
+// ТЕРМИЧЕСКИЙ РЕФОРМИНГ - WEB ИНТЕРФЕЙС
+// ============================================
+
+// ============================================
 // 1. КОНФИГУРАЦИЯ
 // ============================================
 const CONFIG = {
+    // Буфер точек: 6 часов с обновлением раз в 3 секунды = 7200 точек
     MAX_POINTS: 7200,
     WS_URL: 'ws://' + window.location.hostname + ':8080',
-    MEASURE_INTERVAL: 1000,
-    CHART_UPDATE_INTERVAL: 1000,
+    
+    // Диапазоны отображения (в минутах)
     RANGES: {
-        '30м': 3600,
-        '15м': 1800,
-        '5м': 600,
-        '1м': 120
+        '10': 10,    // 10 минут
+        '30': 30,    // 30 минут
+        '60': 60,    // 1 час
+        '180': 180,  // 3 часа
+        '360': 360   // 6 часов
     },
+    
+    // Периоды обновления (мс)
+    UPDATE_INTERVAL: 3000,  // 3 секунды, синхронизировано с дисплеем
+    
+    // Настройки реконнекта
     RECONNECT: {
         MAX_ATTEMPTS: 5,
-        DELAYS: [1, 2, 4, 8, 15, 30],
-        WATCHDOG_INTERVAL: 5000
-    },
-    WATCHDOG: {
-        DATA_TIMEOUT: 15000
+        BASE_DELAY: 1000,
+        MAX_DELAY: 30000
     }
 };
 
@@ -26,138 +34,106 @@ const CONFIG = {
 // 2. СОСТОЯНИЕ
 // ============================================
 const state = {
+    // WebSocket
     socket: null,
     reconnectAttempts: 0,
     reconnectTimeout: null,
-    lastDataTime: Date.now(),
-    pageVisible: true,
     
-    dataBuffer: {
+    // Данные (соответствуют формату ESP32)
+    powerState: false,      // из state (1/0)
+    targetTemp: 45.0,       // из target
+    currentTime: "00:00",   // из time
+    
+    // Датчики (3 штуки)
+    sensors: [0, 0, 0],     // sensor0, sensor1, sensor2
+    
+    // Мощность (пока заглушка, потом добавим)
+    powerValue: 0,
+    duty: 0,
+    
+    // Буфер данных для графика
+    buffer: {
         time: new Array(CONFIG.MAX_POINTS).fill(''),
-        guild: new Array(CONFIG.MAX_POINTS).fill(null),
-        wall50: new Array(CONFIG.MAX_POINTS).fill(null),
-        wall75: new Array(CONFIG.MAX_POINTS).fill(null),
-        wall100: new Array(CONFIG.MAX_POINTS).fill(null),
+        sensor0: new Array(CONFIG.MAX_POINTS).fill(null),  // Гильза (зелёный)
+        sensor1: new Array(CONFIG.MAX_POINTS).fill(null),  // 50см (жёлтый)
+        sensor2: new Array(CONFIG.MAX_POINTS).fill(null),  // 100см (оранжевый)
+        target: new Array(CONFIG.MAX_POINTS).fill(null),    // Уставка
         index: 0,
-        count: 0,
-        lastTime: ''
+        count: 0
     },
     
-    lastValues: {
-        mode: -1,
-        color: -1,
-        time: '',
-        baseTemp: null
-    },
-    
-    currentRange: 1800,  // 15м по умолчанию
-    chart: null,
-    powerState: false,
-    targetTemp: 30.0
+    // Отображение
+    currentRange: 30,  // 30 минут по умолчанию
+    chart: null
 };
 
 // ============================================
 // 3. DOM ЭЛЕМЕНТЫ
 // ============================================
 const dom = {
-    get: (id) => document.getElementById(id),
+    // Верхняя панель
+    topSetpoint: document.getElementById('topSetpoint'),
+    topTime: document.getElementById('topTime'),
+    wifiDot: document.getElementById('wifiDot'),
     
-    modeDisplay: document.getElementById('modeDisplay'),
-    card0: document.getElementById('card0'),
-    card1: document.getElementById('card1'),
-    card2: document.getElementById('card2'),
-    card3: document.getElementById('card3'),
-    panelStatusDot: document.getElementById('panelStatusDot'),
-    panelStatusText: document.getElementById('panelStatusText'),
-    targetValue: document.getElementById('targetValue'),
+    // Левая панель - датчики
+    sensor1: document.getElementById('sensor1'),
+    sensor2: document.getElementById('sensor2'),
+    sensor3: document.getElementById('sensor3'),
+    
+    // Левая панель - управление
     btnPower: document.getElementById('btnPower'),
+    setpointInput: document.getElementById('setpointInput'),
+    powerValue: document.getElementById('powerValue'),
+    timerValue: document.getElementById('timerValue'),
+    wifiDotLeft: document.getElementById('wifiDotLeft'),
+    
+    // Нижняя панель (отладка)
     debugBuffer: document.getElementById('debugBuffer'),
-    debugRange: document.getElementById('debugRange'),
-    debugActive: document.getElementById('debugActive'),
-    debugIP: document.getElementById('debugIP'),
-    minTemp: document.getElementById('minTemp'),
-    maxTemp: document.getElementById('maxTemp'),
-    modal: document.getElementById('targetModal'),
-    modalTarget: document.getElementById('modalTarget'),
-    modalSubmit: document.getElementById('modalSubmit'),
-    modalClose: document.querySelector('.close')
+    debugSensors: document.getElementById('debugSensors'),
+    debugMode: document.getElementById('debugMode')
 };
 
 // ============================================
-// 4. ОБНОВЛЕНИЕ ИНТЕРФЕЙСА
-// ============================================
-function updateStatus(status, attempts = 0) {
-    const dot = dom.panelStatusDot;
-    const text = dom.panelStatusText;
-    
-    if (status === 'online') {
-        dot.className = 'panel-status-dot online';
-        text.className = 'panel-status-text online';
-        text.textContent = 'ON';
-        state.reconnectAttempts = 0;
-    } 
-    else if (status === 'offline') {
-        const isYellow = attempts <= CONFIG.RECONNECT.MAX_ATTEMPTS;
-        dot.className = `panel-status-dot ${isYellow ? 'offline-yellow' : 'offline'}`;
-        text.className = `panel-status-text ${isYellow ? 'offline-yellow' : 'offline'}`;
-        text.textContent = 'OFF';
-    }
-}
-
-function updateModeDisplay(mode, color, timeStr, baseTemp) {
-    if (!dom.modeDisplay) return;
-    
-    let newText, newClass;
-    
-    if (mode === 0) {
-        newClass = 'mode-bar mode0';
-        newText = 'СТАБИЛИЗАЦИЯ ' + timeStr;
-    } else {
-        const colorClass = color === 1 ? 'mode1-yellow' : (color === 2 ? 'mode1-red' : 'mode1-green');
-        newClass = `mode-bar ${colorClass}`;
-        const baseStr = baseTemp !== null ? baseTemp.toFixed(1) : '--.-';
-        newText = `РАБОЧИЙ ${baseStr}° ${timeStr}`;
-    }
-    
-    dom.modeDisplay.className = newClass;
-    dom.modeDisplay.textContent = newText;
-}
-
-function updateCards(data) {
-    if (dom.card0) dom.card0.textContent = data.guild.toFixed(1);
-    if (dom.card1) dom.card1.textContent = data.wall50.toFixed(1);
-    if (dom.card2) dom.card2.textContent = data.wall75.toFixed(1);
-    if (dom.card3) dom.card3.textContent = data.wall100.toFixed(1);
-}
-
-function updateTargetDisplay(value) {
-    if (dom.targetValue) {
-        dom.targetValue.textContent = value.toFixed(1);
-    }
-    state.targetTemp = value;
-}
-
-function updatePowerButton(state) {
-    if (dom.btnPower) {
-        dom.btnPower.textContent = state ? 'ВЫКЛ' : 'ВКЛ';
-        dom.btnPower.style.background = state ? '#f44336' : '#4CAF50';
-    }
-}
-
-// ============================================
-// 5. ГРАФИК
+// 4. ИНИЦИАЛИЗАЦИЯ ГРАФИКА
 // ============================================
 function initChart() {
     const ctx = document.getElementById('tempChart').getContext('2d');
+    
     state.chart = new Chart(ctx, {
         type: 'line',
         data: {
             labels: [],
             datasets: [
-                { label: 'Гильза', data: [], borderColor: '#00FF00', borderWidth: 1.5, tension: 0.3, pointRadius: 0 },
-                { label: '50см', data: [], borderColor: '#FFFF00', borderWidth: 1.5, tension: 0.3, pointRadius: 0 },
-                { label: '75см', data: [], borderColor: '#00FFFF', borderWidth: 1.5, tension: 0.3, pointRadius: 0 },
-                { label: '100см', data: [], borderColor: '#FFA500', borderWidth: 1.5, tension: 0.3, pointRadius: 0 }
+                { 
+                    data: [], 
+                    borderColor: '#00FF00', 
+                    borderWidth: 2,
+                    tension: 0.2,
+                    pointRadius: 0
+                },
+                { 
+                    data: [], 
+                    borderColor: '#FFFF00', 
+                    borderWidth: 2,
+                    tension: 0.2,
+                    pointRadius: 0
+                },
+                { 
+                    data: [], 
+                    borderColor: '#FFA500', 
+                    borderWidth: 2,
+                    tension: 0.2,
+                    pointRadius: 0
+                },
+                { 
+                    data: [], 
+                    borderColor: '#FFFFFF', 
+                    borderWidth: 1.5,
+                    borderDash: [5, 5],
+                    tension: 0,
+                    pointRadius: 0
+                }
             ]
         },
         options: {
@@ -166,33 +142,49 @@ function initChart() {
             animation: { duration: 0 },
             scales: {
                 y: { 
-                    min: 20, max: 70,
+                    min: 20,
+                    max: 70,
                     grid: { color: '#333' },
-                    ticks: { color: '#ccc' }
+                    ticks: { color: '#ccc', stepSize: 5 }
                 },
-                x: { ticks: { color: '#ccc', maxTicksLimit: 8 } }
+                x: { 
+                    ticks: { 
+                        color: '#ccc',
+                        maxTicksLimit: 8,
+                        callback: function(val, index) {
+                            const label = this.getLabelForValue(val);
+                            return label ? label.substring(0, 5) : '';
+                        }
+                    }
+                }
             },
             plugins: {
                 legend: { display: false },
                 zoom: {
                     pan: { enabled: true, mode: 'y' },
-                    zoom: { enabled: true, mode: 'y', wheel: { enabled: false } }
+                    wheel: { enabled: false },
+                    drag: { enabled: true, mode: 'y' },
+                    pinch: { enabled: true, mode: 'y' }
                 }
             }
         }
     });
 }
 
+// ============================================
+// 5. ОБНОВЛЕНИЕ ГРАФИКА
+// ============================================
 function updateChart() {
-    const desiredPoints = state.currentRange;
-    const totalPoints = state.dataBuffer.count;
-    
     if (!state.chart) return;
     
-    // Обновляем labels
-    state.chart.data.labels = new Array(desiredPoints).fill('');
+    // Сколько точек показываем (переводим минуты в точки)
+    // 3 секунды на точку = 20 точек в минуту
+    const pointsPerMinute = Math.floor(60000 / CONFIG.UPDATE_INTERVAL);
+    const desiredPoints = state.currentRange * pointsPerMinute;
+    const availablePoints = Math.min(state.buffer.count, desiredPoints);
     
-    // Подготавливаем данные
+    // Создаём массивы нужной длины
+    const labels = new Array(desiredPoints).fill('');
     const datasets = [
         new Array(desiredPoints).fill(null),
         new Array(desiredPoints).fill(null),
@@ -200,70 +192,126 @@ function updateChart() {
         new Array(desiredPoints).fill(null)
     ];
     
-    const availableData = Math.min(totalPoints, desiredPoints);
-    
-    for (let i = 0; i < availableData; i++) {
-        const dataIdx = (state.dataBuffer.index - availableData + i + CONFIG.MAX_POINTS) % CONFIG.MAX_POINTS;
-        const chartIdx = desiredPoints - availableData + i;
+    // Заполняем данными
+    for (let i = 0; i < availablePoints; i++) {
+        const bufferIdx = (state.buffer.index - availablePoints + i + CONFIG.MAX_POINTS) % CONFIG.MAX_POINTS;
+        const chartIdx = desiredPoints - availablePoints + i;
         
-        if (state.dataBuffer.time[dataIdx]) {
-            state.chart.data.labels[chartIdx] = state.dataBuffer.time[dataIdx];
-        }
-        
-        datasets[0][chartIdx] = state.dataBuffer.guild[dataIdx];
-        datasets[1][chartIdx] = state.dataBuffer.wall50[dataIdx];
-        datasets[2][chartIdx] = state.dataBuffer.wall75[dataIdx];
-        datasets[3][chartIdx] = state.dataBuffer.wall100[dataIdx];
+        labels[chartIdx] = state.buffer.time[bufferIdx];
+        datasets[0][chartIdx] = state.buffer.sensor0[bufferIdx];
+        datasets[1][chartIdx] = state.buffer.sensor1[bufferIdx];
+        datasets[2][chartIdx] = state.buffer.sensor2[bufferIdx];
+        datasets[3][chartIdx] = state.buffer.target[bufferIdx];
     }
     
-    state.chart.data.datasets.forEach((ds, i) => { ds.data = datasets[i]; });
+    state.chart.data.labels = labels;
+    state.chart.data.datasets.forEach((ds, i) => {
+        ds.data = datasets[i];
+    });
+    
     state.chart.update();
+    
+    // Обновляем отладку
+    if (dom.debugBuffer) {
+        dom.debugBuffer.textContent = `${state.buffer.count}/${CONFIG.MAX_POINTS}`;
+    }
 }
 
 // ============================================
-// 6. ОБРАБОТКА ДАННЫХ
+// 6. ОБНОВЛЕНИЕ ИНТЕРФЕЙСА
+// ============================================
+function updateUI() {
+    // Датчики
+    if (dom.sensor1) dom.sensor1.textContent = state.sensors[0].toFixed(1);  // sensor0
+    if (dom.sensor2) dom.sensor2.textContent = state.sensors[1].toFixed(1);  // sensor1
+    if (dom.sensor3) dom.sensor3.textContent = state.sensors[2].toFixed(1);  // sensor2
+    
+    // Уставка
+    if (dom.topSetpoint) dom.topSetpoint.textContent = state.targetTemp.toFixed(1) + '°C';
+    if (dom.setpointInput) dom.setpointInput.value = state.targetTemp.toFixed(1);
+    
+    // Время (из ESP)
+    if (dom.topTime) dom.topTime.textContent = state.currentTime;
+    if (dom.timerValue) dom.timerValue.textContent = state.currentTime;
+    
+    // Кнопка питания
+    if (dom.btnPower) {
+        dom.btnPower.textContent = state.powerState ? 'ВЫКЛ' : 'ВКЛ';
+        dom.btnPower.className = 'power-btn' + (state.powerState ? '' : ' off');
+    }
+    
+    // Мощность (пока заглушка)
+    if (dom.powerValue) {
+        dom.powerValue.textContent = `${state.powerValue.toFixed(1)}% (${state.duty})`;
+    }
+    
+    // Отладка
+    if (dom.debugSensors) dom.debugSensors.textContent = '3';
+    if (dom.debugMode) dom.debugMode.textContent = state.powerState ? 'Работа' : 'Стоп';
+}
+
+// ============================================
+// 7. ОБНОВЛЕНИЕ WiFi СТАТУСА
+// ============================================
+function updateWiFiStatus(online) {
+    const dotClass = online ? 'online' : 'offline-pulse';
+    if (dom.wifiDot) {
+        dom.wifiDot.className = `wifi-dot ${dotClass}`;
+    }
+    if (dom.wifiDotLeft) {
+        dom.wifiDotLeft.className = `wifi-dot ${dotClass}`;
+    }
+}
+
+// ============================================
+// 8. ОБРАБОТКА ВХОДЯЩИХ ДАННЫХ
 // ============================================
 function processData(data) {
-    state.lastDataTime = Date.now();
+    console.log('Получены данные:', data);  // Отладка
     
-    updateCards(data);
-    updateModeDisplay(data.mode, data.color, data.time, data.baseTemp);
+    // Сохраняем состояние (соответствует формату ESP32)
+    state.powerState = data.state === 1;      // state: 1=ON, 0=OFF
+    state.targetTemp = data.target || 45.0;
+    state.currentTime = data.time || '00:00';
     
-    // Сохраняем в буфер
+    // Датчики: sensor0, sensor1, sensor2
+    state.sensors = [
+        data.sensor0 || 0,
+        data.sensor1 || 0,
+        data.sensor2 || 0
+    ];
+    
+    // Мощность (пока нет в данных, оставляем заглушку)
+    // Когда появится - будет data.power и data.duty
+    
+    // Добавляем точку в буфер графика
     const now = new Date();
-    const timeLabel = `${now.getHours().toString().padStart(2,'0')}:${now.getMinutes().toString().padStart(2,'0')}:${now.getSeconds().toString().padStart(2,'0')}`;
+    const timeLabel = `${now.getHours().toString().padStart(2,'0')}:${now.getMinutes().toString().padStart(2,'0')}`;
     
-    const idx = state.dataBuffer.index;
-    state.dataBuffer.time[idx] = timeLabel;
-    state.dataBuffer.guild[idx] = data.guild;
-    state.dataBuffer.wall50[idx] = data.wall50;
-    state.dataBuffer.wall75[idx] = data.wall75;
-    state.dataBuffer.wall100[idx] = data.wall100;
+    const idx = state.buffer.index;
+    state.buffer.time[idx] = timeLabel;
+    state.buffer.sensor0[idx] = data.sensor0 || null;
+    state.buffer.sensor1[idx] = data.sensor1 || null;
+    state.buffer.sensor2[idx] = data.sensor2 || null;
+    state.buffer.target[idx] = state.targetTemp;
     
-    state.dataBuffer.index = (idx + 1) % CONFIG.MAX_POINTS;
-    if (state.dataBuffer.count < CONFIG.MAX_POINTS) state.dataBuffer.count++;
+    state.buffer.index = (idx + 1) % CONFIG.MAX_POINTS;
+    if (state.buffer.count < CONFIG.MAX_POINTS) state.buffer.count++;
     
+    // Обновляем интерфейс
+    updateUI();
     updateChart();
-    updateDebugInfo();
-}
-
-function updateDebugInfo() {
-    if (dom.debugBuffer) dom.debugBuffer.textContent = `${state.dataBuffer.count}/${CONFIG.MAX_POINTS}`;
-    if (dom.debugRange) dom.debugRange.textContent = state.currentRange;
-    
-    const btnName = Object.keys(CONFIG.RANGES).find(k => CONFIG.RANGES[k] === state.currentRange) || '15м';
-    if (dom.debugActive) dom.debugActive.textContent = btnName;
 }
 
 // ============================================
-// 7. WEBSOCKET
+// 9. WEBSOCKET
 // ============================================
 function connectWebSocket() {
     if (state.socket) {
         state.socket.close();
     }
     
-    updateStatus('offline', state.reconnectAttempts + 1);
+    updateWiFiStatus(false);
     
     try {
         state.socket = new WebSocket(CONFIG.WS_URL);
@@ -273,141 +321,111 @@ function connectWebSocket() {
     }
     
     state.socket.onopen = function() {
-        updateStatus('online');
+        updateWiFiStatus(true);
         state.reconnectAttempts = 0;
-        state.lastDataTime = Date.now();
-        
-        // Запрашиваем IP
-        fetch('http://' + window.location.hostname)
-            .then(() => { if (dom.debugIP) dom.debugIP.textContent = window.location.hostname; })
-            .catch(() => {});
     };
     
     state.socket.onclose = function() {
+        updateWiFiStatus(false);
         scheduleReconnect();
     };
     
     state.socket.onmessage = function(event) {
         try {
-            processData(JSON.parse(event.data));
-        } catch (e) {}
+            const data = JSON.parse(event.data);
+            processData(data);
+        } catch (e) {
+            console.error('Ошибка парсинга:', e);
+        }
     };
 }
 
 function scheduleReconnect() {
     state.reconnectAttempts++;
-    updateStatus('offline', state.reconnectAttempts);
     
-    const delay = Math.min(30000, state.reconnectAttempts * 2000);
+    const delay = Math.min(
+        CONFIG.RECONNECT.MAX_DELAY,
+        CONFIG.RECONNECT.BASE_DELAY * Math.pow(2, state.reconnectAttempts)
+    );
     
     if (state.reconnectTimeout) clearTimeout(state.reconnectTimeout);
     state.reconnectTimeout = setTimeout(connectWebSocket, delay);
 }
 
 // ============================================
-// 8. ОТПРАВКА КОМАНД
+// 10. ОТПРАВКА КОМАНД
 // ============================================
 function sendCommand(command, value) {
     if (!state.socket || state.socket.readyState !== WebSocket.OPEN) return;
     
     const msg = { command: command };
     
-    if (command === 'setTarget') {
+    if (command === 'setPower') {
         msg.value = value;
-    } else if (command === 'setPower') {
+    } else if (command === 'setTarget') {
         msg.value = value;
-    } else if (command === 'setPID') {
-        msg.Kp = value.Kp;
-        msg.Ki = value.Ki;
-        msg.Kd = value.Kd;
     }
     
     state.socket.send(JSON.stringify(msg));
 }
 
 // ============================================
-// 9. УПРАВЛЕНИЕ
+// 11. УПРАВЛЕНИЕ
 // ============================================
 function setupControls() {
-    // Кнопки масштаба
+    // Кнопка питания
+    dom.btnPower.addEventListener('click', () => {
+        state.powerState = !state.powerState;
+        sendCommand('setPower', state.powerState ? 1 : 0);
+        updateUI();
+    });
+    
+    // Изменение уставки
+    dom.setpointInput.addEventListener('change', function() {
+        const val = parseFloat(this.value);
+        if (!isNaN(val) && val >= 40 && val <= 70) {
+            state.targetTemp = val;
+            sendCommand('setTarget', val);
+            updateUI();
+        } else {
+            this.value = state.targetTemp.toFixed(1);
+        }
+    });
+    
+    // Кнопки масштаба графика
     document.querySelectorAll('.scale-btn').forEach(btn => {
         btn.addEventListener('click', function() {
-            const range = this.dataset.range;
-            if (range && CONFIG.RANGES[range]) {
-                state.currentRange = CONFIG.RANGES[range];
-                document.querySelectorAll('.scale-btn').forEach(b => b.classList.remove('active'));
+            const range = parseInt(this.dataset.range);
+            if (!isNaN(range) && CONFIG.RANGES[range.toString()]) {
+                state.currentRange = range;
+                
+                document.querySelectorAll('.scale-btn').forEach(b => 
+                    b.classList.remove('active')
+                );
                 this.classList.add('active');
+                
                 updateChart();
             }
         });
     });
-    
-    // Кнопка питания
-    dom.btnPower.addEventListener('click', () => {
-        state.powerState = !state.powerState;
-        sendCommand('setPower', state.powerState);
-        updatePowerButton(state.powerState);
-    });
-    
-    // Кнопка установки уставки
-    dom.btnSetTarget.addEventListener('click', () => {
-        dom.modalTarget.value = state.targetTemp;
-        dom.modal.style.display = 'block';
-    });
-    
-    // Модальное окно
-    dom.modalClose.addEventListener('click', () => {
-        dom.modal.style.display = 'none';
-    });
-    
-    dom.modalSubmit.addEventListener('click', () => {
-        const val = parseFloat(dom.modalTarget.value);
-        if (!isNaN(val) && val >= 0 && val <= 70) {
-            sendCommand('setTarget', val);
-            updateTargetDisplay(val);
-        }
-        dom.modal.style.display = 'none';
-    });
-    
-    window.addEventListener('click', (e) => {
-        if (e.target === dom.modal) dom.modal.style.display = 'none';
-    });
-    
-    // Границы графика
-    let minTimeout, maxTimeout;
-    dom.minTemp.addEventListener('input', function() {
-        clearTimeout(minTimeout);
-        minTimeout = setTimeout(() => {
-            const val = parseFloat(this.value);
-            if (!isNaN(val) && state.chart) {
-                state.chart.options.scales.y.min = val;
-                state.chart.update();
-            }
-        }, 300);
-    });
-    
-    dom.maxTemp.addEventListener('input', function() {
-        clearTimeout(maxTimeout);
-        maxTimeout = setTimeout(() => {
-            const val = parseFloat(this.value);
-            if (!isNaN(val) && state.chart) {
-                state.chart.options.scales.y.max = val;
-                state.chart.update();
-            }
-        }, 300);
-    });
 }
 
 // ============================================
-// 10. ЗАПУСК
+// 12. ЗАПУСК
 // ============================================
 window.addEventListener('load', () => {
     initChart();
     setupControls();
     connectWebSocket();
     
-    // Устанавливаем активную кнопку масштаба
+    // Устанавливаем активную кнопку (30 минут по умолчанию)
     document.querySelectorAll('.scale-btn').forEach(btn => {
-        if (btn.dataset.range === '15м') btn.classList.add('active');
+        if (btn.dataset.range === '30') {
+            btn.classList.add('active');
+        }
     });
+    
+    // Начальное состояние интерфейса
+    updateUI();
+    updateWiFiStatus(false);
 });

@@ -26,176 +26,228 @@ body {
 }
 
 /* ============================================ */
-/* ВЕРХНЕЕ ОКНО */
+/* ВЕРХНЯЯ ПАНЕЛЬ */
 /* ============================================ */
 .window-header {
     top: 0;
     left: 0;
     right: 0;
-    height: 20px;
+    height: 32px;
     border-bottom: 1px solid #333;
+    display: flex;
+    align-items: center;
 }
 
-.mode-bar {
+.top-bar {
     width: 100%;
     height: 100%;
     display: flex;
     align-items: center;
-    justify-content: center;
-    font-weight: bold;
+    justify-content: space-between;
+    padding: 0 16px;
     font-size: 14px;
-    transition: background-color 0.3s;
+    font-weight: bold;
 }
 
-.mode0 { background: #0066cc; }
-.mode1-green { background: #00aa00; }
-.mode1-yellow { background: #cccc00; color: #000; }
-.mode1-red { background: #cc0000; }
+.top-left {
+    color: #ffaa00;
+    width: 200px;
+}
+
+.top-center {
+    color: #ffffff;
+    font-size: 18px;
+    font-weight: bold;
+    text-align: center;
+    flex: 1;
+}
+
+.top-right {
+    width: 200px;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 12px;
+}
+
+.top-time {
+    color: #aaa;
+    font-family: monospace;
+    font-size: 16px;
+}
 
 /* ============================================ */
-/* ЛЕВОЕ ОКНО */
+/* ЛЕВАЯ ПАНЕЛЬ */
 /* ============================================ */
 .window-left {
-    top: 20px;
+    top: 32px;
     left: 0;
     bottom: 30px;
-    width: 100px;
+    width: 140px;
     border-right: 1px solid #333;
     overflow-y: auto;
 }
 
 .left-panel {
     width: 100%;
-    padding: 8px 0;
+    padding: 12px 8px;
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 4px;
+    gap: 12px;
 }
 
-.temp-card {
-    width: 90px;
-    height: 22px;
+/* Датчики */
+.sensor-temp {
+    width: 120px;
+    height: 36px;
     background: #2a2a2a;
-    border-radius: 3px;
+    border-radius: 6px;
     display: flex;
     justify-content: center;
     align-items: center;
+    font-size: 24px;
+    font-weight: bold;
+    font-family: monospace;
+    border: 1px solid #444;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+}
+
+/* Кнопка питания */
+.power-btn {
+    width: 120px;
+    height: 40px;
+    background: #4CAF50;
+    border: none;
+    color: white;
     font-size: 18px;
     font-weight: bold;
-    margin-bottom: 2px;
-}
-
-.scale-btn {
-    width: 90px;
-    height: 20px;
-    background: #333;
-    border: none;
-    color: white;
-    font-size: 11px;
-    border-radius: 3px;
+    border-radius: 6px;
     cursor: pointer;
-    margin: 1px 0;
-    transition: background-color 0.2s;
-    outline: none;
-}
-
-.scale-btn:hover { background: #3a3a3a; }
-.scale-btn:active { background: #4a4a4a; }
-.scale-btn.active { background: #0066cc !important; }
-
-/* Новые кнопки управления */
-.action-btn {
-    width: 90px;
-    height: 24px;
-    background: #444;
-    border: none;
-    color: white;
-    font-size: 12px;
-    font-weight: bold;
-    border-radius: 4px;
-    cursor: pointer;
-    margin: 2px 0;
+    margin: 4px 0;
     transition: all 0.2s;
-}
-
-.action-btn:hover { filter: brightness(1.2); }
-.action-btn:active { transform: scale(0.98); }
-
-/* Нижний блок */
-.panel-bottom {
-    margin-top: 8px;
-    width: 100%;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 6px;
-    border-top: 1px solid #444;
-    padding-top: 8px;
-}
-
-.panel-range-item {
-    width: 90px;
-    background: #2a2a2a;
-    border-radius: 4px;
-    padding: 3px 0;
-    text-align: center;
-}
-
-.panel-range-item label {
-    color: #aaa;
-    font-size: 9px;
-    display: block;
-}
-
-.panel-range-item input {
-    width: 80px;
-    background: #333;
     border: 1px solid #555;
-    color: white;
-    padding: 2px;
-    border-radius: 3px;
-    font-size: 11px;
-    text-align: center;
 }
 
-.panel-target {
-    width: 90px;
+.power-btn:hover {
+    filter: brightness(1.1);
+    transform: scale(1.02);
+}
+
+.power-btn:active {
+    transform: scale(0.98);
+}
+
+.power-btn.off {
+    background: #f44336;
+}
+
+/* Блок уставки */
+.setpoint-block {
+    width: 120px;
     background: #2a2a2a;
-    border-radius: 4px;
-    padding: 3px 0;
+    border-radius: 6px;
+    padding: 8px 0;
     text-align: center;
     border: 1px solid #0066cc;
 }
 
-.target-label {
+.setpoint-label {
     color: #aaa;
-    font-size: 9px;
-    display: block;
+    font-size: 11px;
+    margin-bottom: 4px;
 }
 
-.target-value {
+.setpoint-block input {
+    width: 100px;
+    background: #333;
+    border: 1px solid #555;
+    color: white;
+    padding: 4px;
+    border-radius: 4px;
+    font-size: 18px;
+    font-weight: bold;
+    text-align: center;
+    font-family: monospace;
+}
+
+.setpoint-block input:focus {
+    outline: none;
+    border-color: #0066cc;
+}
+
+/* Блок мощности */
+.power-block {
+    width: 120px;
+    background: #2a2a2a;
+    border-radius: 6px;
+    padding: 8px 0;
+    text-align: center;
+    border: 1px solid #ffaa00;
+}
+
+.power-label {
+    color: #aaa;
+    font-size: 11px;
+    margin-bottom: 4px;
+}
+
+.power-value {
     font-size: 16px;
     font-weight: bold;
     color: #ffaa00;
+    font-family: monospace;
 }
 
-.panel-status {
-    width: 90px;
+/* Блок таймера */
+.timer-block {
+    width: 120px;
     background: #2a2a2a;
-    border-radius: 4px;
-    padding: 4px 0;
+    border-radius: 6px;
+    padding: 8px 0;
+    text-align: center;
+    border: 1px solid #4CAF50;
+}
+
+.timer-label {
+    color: #aaa;
+    font-size: 11px;
+    margin-bottom: 4px;
+}
+
+.timer-value {
+    font-size: 20px;
+    font-weight: bold;
+    color: #4CAF50;
+    font-family: monospace;
+}
+
+/* WiFi блок */
+.wifi-block {
+    width: 120px;
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 4px;
+    gap: 6px;
+    padding: 4px 0;
 }
 
-.panel-status-dot {
-    width: 8px;
-    height: 8px;
+.wifi-dot {
+    width: 12px;
+    height: 12px;
     border-radius: 50%;
+    display: inline-block;
     transition: all 0.3s;
+}
+
+.wifi-dot.online {
+    background: #4CAF50;
+    box-shadow: 0 0 8px #4CAF50;
+}
+
+.wifi-dot.offline {
+    background: #f44336;
+    box-shadow: 0 0 8px #f44336;
 }
 
 @keyframes pulse {
@@ -204,50 +256,63 @@ body {
     100% { opacity: 1; transform: scale(1); }
 }
 
-.panel-status-dot.online {
-    background: #4CAF50;
-    box-shadow: 0 0 4px #4CAF50;
-    animation: none;
-}
-
-.panel-status-text.online { color: #4CAF50; }
-
-.panel-status-dot.offline-yellow {
-    background: #ffaa00;
-    box-shadow: 0 0 4px #ffaa00;
-    animation: pulse 1.5s infinite;
-}
-
-.panel-status-text.offline-yellow {
-    color: #ffaa00;
-    animation: pulse 1.5s infinite;
-}
-
-.panel-status-dot.offline {
+.wifi-dot.offline-pulse {
     background: #f44336;
-    box-shadow: 0 0 4px #f44336;
+    box-shadow: 0 0 8px #f44336;
     animation: pulse 1.5s infinite;
 }
 
-.panel-status-text.offline {
-    color: #f44336;
-    animation: pulse 1.5s infinite;
-}
-
-.panel-status-text {
-    font-size: 11px;
-    font-weight: bold;
+.wifi-text {
+    color: #aaa;
+    font-size: 12px;
 }
 
 /* ============================================ */
 /* ОКНО ГРАФИКА */
 /* ============================================ */
 .window-graph {
-    top: 20px;
-    left: 100px;
+    top: 32px;
+    left: 140px;
     right: 0;
     bottom: 30px;
     background: #1a1a1a;
+}
+
+.graph-toolbar {
+    position: absolute;
+    top: 8px;
+    right: 16px;
+    z-index: 10;
+    display: flex;
+    gap: 4px;
+    background: rgba(30,30,30,0.8);
+    padding: 4px;
+    border-radius: 6px;
+    backdrop-filter: blur(4px);
+}
+
+.scale-btn {
+    width: 50px;
+    height: 28px;
+    background: #333;
+    border: 1px solid #555;
+    color: #ccc;
+    font-size: 12px;
+    font-weight: bold;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.scale-btn:hover {
+    background: #444;
+    color: white;
+}
+
+.scale-btn.active {
+    background: #0066cc;
+    border-color: #0066cc;
+    color: white;
 }
 
 #tempChart {
@@ -256,7 +321,7 @@ body {
 }
 
 /* ============================================ */
-/* НИЖНЕЕ ОКНО */
+/* НИЖНЯЯ ПАНЕЛЬ (ОТЛАДКА) */
 /* ============================================ */
 .window-debug {
     left: 0;
@@ -269,18 +334,14 @@ body {
 .debug-bar {
     width: 100%;
     height: 100%;
-    padding: 0 8px;
+    padding: 0 16px;
     font-family: monospace;
-    font-size: 11px;
+    font-size: 12px;
     color: #aaa;
     display: flex;
     align-items: center;
-    justify-content: center;
-    gap: 12px;
-}
-
-.debug-bar span {
-    white-space: nowrap;
+    justify-content: flex-start;
+    gap: 24px;
 }
 
 .debug-value {
@@ -289,7 +350,7 @@ body {
 }
 
 /* ============================================ */
-/* МОДАЛЬНОЕ ОКНО */
+/* МОДАЛЬНОЕ ОКНО (ОСТАВЛЯЕМ ПРО ЗАПАС) */
 /* ============================================ */
 .modal {
     display: none;
