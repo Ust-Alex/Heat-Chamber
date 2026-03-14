@@ -6,7 +6,7 @@
 #define PWM_H
 
 #include <Arduino.h>
-#include "config.h"
+#include "config.h"  // ← ЭТО ДОЛЖНО БЫТЬ, А НЕ #include "pwm.h"!
 
 // Инициализация ШИМ: настраивает таймер и канал LEDC для управления нагревателем
 void setupPWM();

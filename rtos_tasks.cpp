@@ -1,0 +1,232 @@
+// ============================================================================
+// rtos_tasks.cpp - Реализация всех задач FreeRTOS
+// ============================================================================
+
+#include "rtos_tasks.h"
+
+// ============================================================================
+// ВНЕШНИЕ ПЕРЕМЕННЫЕ (определены в основном файле)
+// ============================================================================
+U8G2_ST7920_128X64_F_HW_SPI u8g2(U8G2_R0, 5, U8X8_PIN_NONE);
+DallasTemperature sensors(&oneWire);
+DeviceAddress sensorAddresses[MAX_SENSORS];
+uint8_t sensorCount = 0;
+float sensorTemps[MAX_SENSORS] = { 0 };
+float targetTemp = 30.0;
+bool systemState = false;
+unsigned long startMillis = 0;
+int targetHistory[GRAPH_WIDTH] = { 0 };
+float sensorHistory[MAX_SENSORS][GRAPH_WIDTH] = { 0 };
+uPID PIDregulator(D_INPUT | I_SATURATE, PID_INTERVAL);
+
+unsigned long lastGraphShift = 0;
+unsigned long lastGraphDraw = 0;
+unsigned long lastTempUpdate = 0;
+unsigned long lastPIDUpdate = 0;
+
+TaskHandle_t buttonsTaskHandle;
+TaskHandle_t webTaskHandle;
+
+// ============================================================================
+// ЗАДАЧА: ДИСПЛЕЙ (ядро 0, приоритет 2)
+// ============================================================================
+void taskDisplay(void* pvParameters) {
+  Serial.println(F("[DISPLAY] Task started on core 0, priority 2"));
+  
+  while(1) {
+    unsigned long now = millis();
+    
+    if (now - lastGraphShift >= GRAPH_SHIFT_INTERVAL_MS) {
+      lastGraphShift = now;
+      shiftGraphsLeft(targetHistory, sensorHistory, targetTemp, sensorTemps, MAX_SENSORS);
+    }
+    
+    if (now - lastGraphDraw >= GRAPH_DRAW_INTERVAL_MS) {
+      lastGraphDraw = now;
+      drawInterface(
+        &u8g2, startMillis, targetTemp, systemState,
+        sensorTemps, sensorCount,
+        targetHistory, sensorHistory, MAX_SENSORS
+      );
+    }
+    
+    vTaskDelay(pdMS_TO_TICKS(50));
+  }
+}
+
+// ============================================================================
+// ЗАДАЧА: ОПРОС ДАТЧИКОВ (ядро 1, приоритет 3)
+// ============================================================================
+void taskSensors(void* pvParameters) {
+  Serial.println(F("[SENSORS] Task started on core 1, priority 3"));
+  
+  unsigned long lastRead = 0;
+  
+  while(1) {
+    unsigned long now = millis();
+    
+    if (now - lastRead >= TEMP_UPDATE_INTERVAL) {
+      lastRead = now;
+      
+      requestTemperatures(&sensors);
+      
+      for (uint8_t i = 0; i < sensorCount; i++) {
+        sensorTemps[i] = readTemperature(&sensors, sensorAddresses, i);
+      }
+      
+      static unsigned long lastDebug = 0;
+      if (now - lastDebug >= 10000) {
+        lastDebug = now;
+        Serial.printf("[SENSORS] T0: %.2f, T1: %.2f, T2: %.2f\n", 
+                      sensorTemps[0], sensorTemps[1], sensorTemps[2]);
+      }
+    }
+    
+    vTaskDelay(pdMS_TO_TICKS(50));
+  }
+}
+
+// ============================================================================
+// ЗАДАЧА: УПРАВЛЕНИЕ НАГРЕВОМ (ПИД) (ядро 1, приоритет 3)
+// ============================================================================
+void taskHeaterControl(void* pvParameters) {
+  Serial.println(F("[HEATER] Task started on core 1, priority 3"));
+  
+  unsigned long lastPID = 0;
+  
+  while(1) {
+    unsigned long now = millis();
+    
+    if (now - lastPID >= PID_INTERVAL) {
+      lastPID = now;
+      
+      if (systemState && !isnan(sensorTemps[0]) && sensorTemps[0] > 0) {
+        float pidOut = PIDregulator.compute(sensorTemps[0]);
+        float power = (pidOut / (MAX_DUTY / 2)) * 100.0;
+        setHeaterPower(power);
+        
+        static unsigned long lastDebug = 0;
+        if (now - lastDebug >= 30000) {
+          lastDebug = now;
+          Serial.printf("[HEATER] Target: %.1f, Current: %.2f, Power: %.1f%%\n", 
+                        targetTemp, sensorTemps[0], power);
+        }
+      } else {
+        heaterOff();
+      }
+    }
+    
+    vTaskDelay(pdMS_TO_TICKS(50));
+  }
+}
+
+// ============================================================================
+// ЗАДАЧА: ИНИЦИАЛИЗАЦИЯ ШИМ (ядро 1, приоритет 4 - самоуничтожается)
+// ============================================================================
+void taskPWM_init(void* pvParameters) {
+  Serial.println(F("[PWM] Init task started on core 1, priority 4"));
+  
+  setupPWM();
+  ledc_set_duty(LEDC_LOW_SPEED_MODE, PWM_CHANNEL, 0);
+  ledc_update_duty(LEDC_LOW_SPEED_MODE, PWM_CHANNEL);
+  
+  Serial.println(F("[PWM] Init task completed, self-destructing"));
+  vTaskDelete(NULL);
+}
+
+// ============================================================================
+// ФУНКЦИЯ СОЗДАНИЯ ВСЕХ ЗАДАЧ
+// ============================================================================
+void createAllTasks(
+  GButton* btnUp, 
+  GButton* btnDown, 
+  GButton* btnPower,
+  float* targetTempPtr,
+  bool* systemStatePtr,
+  unsigned long* startMillisPtr
+) {
+  Serial.println(F("\n[RTOS] Creating all tasks..."));
+
+  // --------------------------------------------------------------------------
+  // ЗАДАЧА 1: КНОПКИ (ядро 0, приоритет 1)
+  // --------------------------------------------------------------------------
+  Serial.print(F("   Button task (core 0, prio 1, stack 4096) ... "));
+  buttonsTaskHandle = createButtonsTask(
+    btnUp, btnDown, btnPower,
+    targetTempPtr, systemStatePtr, startMillisPtr,
+    MAX_TEMP,
+    [](float newTarget) { PIDregulator.setpoint = newTarget; });
+  Serial.println(F("OK"));
+
+  // --------------------------------------------------------------------------
+  // ЗАДАЧА 2: ДИСПЛЕЙ (ядро 0, приоритет 2)
+  // --------------------------------------------------------------------------
+  Serial.print(F("   Display task (core 0, prio 2, stack 4096) ... "));
+  xTaskCreatePinnedToCore(
+    taskDisplay,
+    "displayTask", 
+    4096,
+    NULL, 
+    2,
+    NULL, 
+    0);
+  Serial.println(F("OK"));
+
+  // --------------------------------------------------------------------------
+  // ЗАДАЧА 3: WiFi/ВЕБ (ядро 1, приоритет 3)
+  // --------------------------------------------------------------------------
+  Serial.print(F("   WiFi task (core 1, prio 3, stack 8192) ... "));
+  xTaskCreatePinnedToCore(
+    taskWebServer, 
+    "webTask", 
+    8192,
+    NULL, 
+    3,
+    &webTaskHandle, 
+    1);
+  Serial.println(F("OK"));
+
+  // --------------------------------------------------------------------------
+  // ЗАДАЧА 4: ШИМ (ядро 1, приоритет 4)
+  // --------------------------------------------------------------------------
+  Serial.print(F("   PWM init task (core 1, prio 4, stack 4096) ... "));
+  xTaskCreatePinnedToCore(
+    taskPWM_init,
+    "pwmTask", 
+    4096,
+    NULL, 
+    4,
+    NULL, 
+    1);
+  Serial.println(F("OK"));
+
+  // --------------------------------------------------------------------------
+  // ЗАДАЧА 5: ДАТЧИКИ (ядро 1, приоритет 3)
+  // --------------------------------------------------------------------------
+  Serial.print(F("   Sensor task (core 1, prio 3, stack 4096) ... "));
+  xTaskCreatePinnedToCore(
+    taskSensors,
+    "sensorTask", 
+    4096,
+    NULL, 
+    3,
+    NULL, 
+    1);
+  Serial.println(F("OK"));
+
+  // --------------------------------------------------------------------------
+  // ЗАДАЧА 6: УПРАВЛЕНИЕ НАГРЕВОМ (ядро 1, приоритет 3)
+  // --------------------------------------------------------------------------
+  Serial.print(F("   Heater task (core 1, prio 3, stack 4096) ... "));
+  xTaskCreatePinnedToCore(
+    taskHeaterControl,
+    "heaterTask", 
+    4096,
+    NULL, 
+    3,
+    NULL, 
+    1);
+  Serial.println(F("OK"));
+
+  Serial.println(F("[RTOS] All tasks created"));
+}

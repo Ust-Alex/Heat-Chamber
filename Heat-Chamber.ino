@@ -1,6 +1,9 @@
 // ============================================================================
 // Heat-Chamber.ino - ПИД-регулятор температуры
 // ============================================================================
+// Теперь только инициализация и запуск задач
+// Все задачи вынесены в rtos_tasks.h/cpp
+// ============================================================================
 
 #include <OneWire.h>
 #include <DallasTemperature.h>
@@ -17,9 +20,10 @@
 #include "wifi_static.h"
 #include "web_server.h"
 #include "web_interface.h"
+#include "rtos_tasks.h"  // <- ВСЕ ЗАДАЧИ ЗДЕСЬ
 
 // ============================================================================
-// ОБЪЕКТЫ
+// ОБЪЕКТЫ (глобальные, для доступа из задач)
 // ============================================================================
 U8G2_ST7920_128X64_F_HW_SPI u8g2(U8G2_R0, 5, U8X8_PIN_NONE);
 OneWire oneWire(ONE_WIRE_BUS);
@@ -27,7 +31,6 @@ DallasTemperature sensors(&oneWire);
 GButton btnUp(BTN_UP_PIN);
 GButton btnDown(BTN_DOWN_PIN);
 GButton btnPower(BTN_POWER_PIN);
-
 uPID PIDregulator(D_INPUT | I_SATURATE, PID_INTERVAL);
 
 // ============================================================================
@@ -40,19 +43,17 @@ uint8_t sensorCount = 0;
 float sensorTemps[MAX_SENSORS] = { 0 };
 unsigned long startMillis = 0;
 
-TaskHandle_t buttonsTaskHandle;
-TaskHandle_t webTaskHandle;
-
-// Буферы графиков
 int targetHistory[GRAPH_WIDTH] = { 0 };
 float sensorHistory[MAX_SENSORS][GRAPH_WIDTH] = { 0 };
 
-// Таймеры
 unsigned long lastTempUpdate = 0;
 unsigned long lastPIDUpdate = 0;
 unsigned long lastGraphShift = 0;
 unsigned long lastGraphDraw = 0;
 unsigned long lastWebSend = 0;
+
+TaskHandle_t buttonsTaskHandle;
+TaskHandle_t webTaskHandle;
 
 // ============================================================================
 // КОЛБЭКИ ДЛЯ WEB
@@ -91,9 +92,9 @@ void setup() {
   Serial.println(F("🔥 HEAT CHAMBER v3.0"));
   Serial.println(F("========================================"));
 
-  // ==========================================================================
+  // --------------------------------------------------------------------------
   // [1] ДИСПЛЕЙ
-  // ==========================================================================
+  // --------------------------------------------------------------------------
   Serial.print(F("[1/12] Display init ... "));
   u8g2.begin();
   u8g2.clearBuffer();
@@ -102,9 +103,9 @@ void setup() {
   u8g2.sendBuffer();
   Serial.println(F("OK"));
 
-  // ==========================================================================
+  // --------------------------------------------------------------------------
   // [2] КНОПКИ
-  // ==========================================================================
+  // --------------------------------------------------------------------------
   Serial.print(F("[2/12] Buttons init ... "));
   btnUp.setDebounce(50);
   btnDown.setDebounce(50);
@@ -114,17 +115,17 @@ void setup() {
   pinMode(BTN_POWER_PIN, INPUT_PULLUP);
   Serial.println(F("OK"));
 
-  // ==========================================================================
-  // [3] ДАТЧИКИ DS18B20
-  // ==========================================================================
+  // --------------------------------------------------------------------------
+  // [3] ДАТЧИКИ
+  // --------------------------------------------------------------------------
   Serial.print(F("[3/12] Sensors init ... "));
   sensorCount = initSensors(&sensors, sensorAddresses);
   Serial.print(sensorCount);
   Serial.println(F(" found"));
 
-  // ==========================================================================
-  // [4] ПИД-РЕГУЛЯТОР
-  // ==========================================================================
+  // --------------------------------------------------------------------------
+  // [4] ПИД
+  // --------------------------------------------------------------------------
   Serial.print(F("[4/12] PID init ... "));
   PIDregulator.Kp = PID_KP;
   PIDregulator.Ki = PID_KI;
@@ -134,16 +135,16 @@ void setup() {
   PIDregulator.outMin = 0;
   Serial.println(F("OK"));
 
-  // ==========================================================================
-  // [5] ГРАФИКИ (БУФЕРЫ)
-  // ==========================================================================
+  // --------------------------------------------------------------------------
+  // [5] ГРАФИКИ
+  // --------------------------------------------------------------------------
   Serial.print(F("[5/12] Graph buffers init ... "));
   initGraphBuffers(targetHistory, sensorHistory, targetTemp, MAX_SENSORS);
   Serial.println(F("OK"));
 
-  // ==========================================================================
-  // [6] WiFi (СТАТИЧЕСКИЙ IP)
-  // ==========================================================================
+  // --------------------------------------------------------------------------
+  // [6] WiFi
+  // --------------------------------------------------------------------------
   Serial.print(F("[6/12] WiFi init ... "));
   if (initWiFi()) {
     Serial.println(F("CONNECTED"));
@@ -151,30 +152,30 @@ void setup() {
     Serial.println(F("FAILED (continue without WiFi)"));
   }
 
-  // ==========================================================================
-  // [7] mDNS (heatchamber.local)
-  // ==========================================================================
+  // --------------------------------------------------------------------------
+  // [7] mDNS
+  // --------------------------------------------------------------------------
   Serial.print(F("[7/12] mDNS init ... "));
   initMDNS();
   Serial.println(F("OK"));
 
-  // ==========================================================================
-  // [8] ВЕБ-СЕРВЕР (HTTP)
-  // ==========================================================================
+  // --------------------------------------------------------------------------
+  // [8] HTTP-СЕРВЕР
+  // --------------------------------------------------------------------------
   Serial.print(F("[8/12] HTTP server init ... "));
   initWebServer();
   Serial.println(F("OK"));
 
-  // ==========================================================================
+  // --------------------------------------------------------------------------
   // [9] WEBSOCKET
-  // ==========================================================================
+  // --------------------------------------------------------------------------
   Serial.print(F("[9/12] WebSocket init ... "));
   initWebSocket();
   Serial.println(F("OK"));
 
-  // ==========================================================================
-  // [10] КОЛБЭКИ ДЛЯ WEB
-  // ==========================================================================
+  // --------------------------------------------------------------------------
+  // [10] WEB-ИНТЕРФЕЙС
+  // --------------------------------------------------------------------------
   Serial.print(F("[10/12] Web callbacks init ... "));
   WebCallbacks callbacks;
   callbacks.onSetTarget = onSetTarget;
@@ -184,38 +185,16 @@ void setup() {
   initWebInterface(callbacks);
   Serial.println(F("OK"));
 
-  // ==========================================================================
-  // [11] ЗАДАЧИ FREERTOS
-  // ==========================================================================
-  Serial.print(F("[11/12] FreeRTOS tasks init ... "));
-
-  // Задача кнопок (ядро 0)
-  buttonsTaskHandle = createButtonsTask(
-    &btnUp, &btnDown, &btnPower,
-    &targetTemp, &systemState, &startMillis,
-    MAX_TEMP,
-    [](float newTarget) { PIDregulator.setpoint = newTarget; });
-
-  // Задача веб-сервера (ядро 1)
-  xTaskCreatePinnedToCore(
-    taskWebServer, "webTask", 8192, NULL, 1, &webTaskHandle, 1);
-
-  Serial.println(F("OK"));
-
-  // ==========================================================================
-  // [12] ШИМ (НАГРЕВАТЕЛЬ) — ПОСЛЕ ЗАДАЧ!
-  // ==========================================================================
-  Serial.print(F("[12/12] PWM init ... "));
-  // setupPWM();
-  // ledc_set_duty(LEDC_LOW_SPEED_MODE, PWM_CHANNEL, 0);
-  // ledc_update_duty(LEDC_LOW_SPEED_MODE, PWM_CHANNEL);
-  Serial.println(F("OK"));
-
   startMillis = millis();
 
-  // ==========================================================================
-  // ФИНАЛЬНЫЙ ВЫВОД
-  // ==========================================================================
+  // --------------------------------------------------------------------------
+  // [11] ЗАДАЧИ FREERTOS (через новый модуль)
+  // --------------------------------------------------------------------------
+  createAllTasks(&btnUp, &btnDown, &btnPower, &targetTemp, &systemState, &startMillis);
+
+  // --------------------------------------------------------------------------
+  // ФИНАЛ
+  // --------------------------------------------------------------------------
   Serial.println(F("\n✅ СИСТЕМА ГОТОВА!"));
   if (isWiFiConnected()) {
     Serial.print(F("🌐 IP: "));
@@ -225,66 +204,9 @@ void setup() {
   Serial.println(F("========================================\n"));
 }
 
-
 // ============================================================================
-// LOOP
+// LOOP - ПУСТОЙ
 // ============================================================================
 void loop() {
-  unsigned long now = millis();
-
-  // 1. Чтение температуры
-  if (now - lastTempUpdate >= TEMP_UPDATE_INTERVAL) {
-    lastTempUpdate = now;
-    requestTemperatures(&sensors);
-
-    // ИСПРАВЛЕНО: убрали min(), просто идём по реальному количеству датчиков
-    for (uint8_t i = 0; i < sensorCount; i++) {
-      sensorTemps[i] = readTemperature(&sensors, sensorAddresses, i);
-    }
-  }
-
-  // 2. ПИД и нагрев
-  if (now - lastPIDUpdate >= PID_INTERVAL) {
-    lastPIDUpdate = now;
-
-    if (systemState && isValidTemperature(sensorTemps[0])) {
-      float pidOut = PIDregulator.compute(sensorTemps[0]);
-      float power = (pidOut / (MAX_DUTY / 2)) * 100.0;
-      setHeaterPower(power);
-    } else {
-      heaterOff();
-    }
-  }
-
-  // 3. Сдвиг графиков
-  if (now - lastGraphShift >= GRAPH_SHIFT_INTERVAL_MS) {
-    lastGraphShift = now;
-    shiftGraphsLeft(targetHistory, sensorHistory, targetTemp, sensorTemps, MAX_SENSORS);
-  }
-
-  // 4. Отрисовка дисплея
-  if (now - lastGraphDraw >= GRAPH_DRAW_INTERVAL_MS) {
-    lastGraphDraw = now;
-    drawInterface(
-      &u8g2, startMillis, targetTemp, systemState,
-      sensorTemps, sensorCount,
-      targetHistory, sensorHistory, MAX_SENSORS);
-  }
-
-  // 5. Отправка данных в веб
-  if (now - lastWebSend >= 1000) {
-    lastWebSend = now;
-
-    if (isWebClientConnected()) {
-      unsigned long elapsed = millis() - startMillis;
-      uint8_t hours = (elapsed / 3600000) % 100;
-      uint8_t minutes = (elapsed / 60000) % 60;
-      char timeStr[6];
-      snprintf(timeStr, sizeof(timeStr), "%02u:%02u", hours, minutes);
-
-      sendWebData(
-        sensorTemps[0], sensorTemps[1], sensorTemps[2],
-        targetTemp, systemState, timeStr);
-    }
-  }
+  vTaskDelay(pdMS_TO_TICKS(1000));
 }
