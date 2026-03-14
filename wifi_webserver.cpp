@@ -7,7 +7,7 @@
 #include <DNSServer.h>
 #include <WiFiManager.h>
 #include <WebSocketsServer.h>
-#include <ESPAsyncWebServer.h>
+#include <ESPAsyncWebServer.h> //V-3.10.0
 #include <LittleFS.h>
 #include <ESPmDNS.h>
 
@@ -73,7 +73,8 @@ void initWebServer() {
   }
   Serial.println("[WEB] ✅ LittleFS смонтирована");
 
-  server.on("/", HTTP_GET, [](AsyncWebServerRequest* request) {
+  // ИСПРАВЛЕНО: используем WebRequestMethod::HTTP_GET для новой библиотеки
+  server.on("/", WebRequestMethod::HTTP_GET, [](AsyncWebServerRequest* request) {
     request->send(LittleFS, "/index.html", "text/html");
   });
 

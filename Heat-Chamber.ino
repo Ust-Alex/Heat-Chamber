@@ -16,7 +16,6 @@
 #include "rtos_buttons.h"
 #include "wifi_webserver.h"
 #include "web_interface.h"
-#include "network.h"
 
 // ============================================================================
 // ОБЪЕКТЫ
@@ -59,6 +58,15 @@ unsigned long lastPIDUpdate = 0;
 unsigned long lastGraphShift = 0;
 unsigned long lastGraphDraw = 0;
 unsigned long lastWebSend = 0;
+
+// ============================================================================
+// ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
+// ============================================================================
+void restartESP(const char* reason) {
+  Serial.printf("Перезагрузка: %s\n", reason);
+  delay(100);
+  ESP.restart();
+}
 
 // ============================================================================
 // КОЛБЭКИ ДЛЯ WEB
