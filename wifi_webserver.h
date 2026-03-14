@@ -6,6 +6,12 @@
 #define WIFI_WEBSERVER_H
 
 #include <Arduino.h>
+#include <WiFi.h>
+#include <WebSocketsServer.h>
+#include <FS.h>
+
+// Явно указываем пространство имён fs
+using namespace fs;
 
 // ============================================================================
 // ВАЖНО! ПРАВИЛЬНЫЙ ПОРЯДОК ПОДКЛЮЧЕНИЯ БИБЛИОТЕК
@@ -21,17 +27,11 @@
 // 3. Теперь подключаем ESPAsyncWebServer — он видит WEBSERVER_H и не конфликтует
 #include <ESPAsyncWebServer.h>
 
-// 4. WebSockets
-#include <WebSocketsServer.h>
-
-#include <functional>
-#include "config.h"
-
 // ============================================================================
 // КОНСТАНТЫ
 // ============================================================================
-#define WEBSOCKET_PORT 8080      // Порт для WebSocket
-#define CONFIG_BUTTON_PIN 0      // GPIO0 (кнопка BOOT) для сброса WiFi
+#define WEBSOCKET_PORT 8080
+#define CONFIG_BUTTON_PIN 0   // GPIO0 (кнопка BOOT)
 
 // ============================================================================
 // СТРУКТУРА ДАННЫХ ДЛЯ ОТПРАВКИ КЛИЕНТАМ
@@ -45,22 +45,14 @@ struct WebData {
 };
 
 // ============================================================================
-// ФУНКЦИИ ИНИЦИАЛИЗАЦИИ
+// ФУНКЦИИ
 // ============================================================================
-void initWiFiManager();    // Запуск WiFiManager и подключение к сети
-void initWebServer();      // Инициализация HTTP-сервера для раздачи файлов
-void initWebSocket();      // Инициализация WebSocket для данных в реальном времени
-void initMDNS();           // Инициализация mDNS (доступ по http://heatchamber.local)
+void initWiFiManager();
+void initWebServer();
+void initWebSocket();
+void initMDNS();
+void broadcastData(const WebData& data);
+bool hasWebClients();
+void taskWiFi(void* pvParameters);
 
-// ============================================================================
-// ОТПРАВКА ДАННЫХ
-// ============================================================================
-void broadcastData(const WebData& data);     // Разослать данные всем клиентам
-bool hasWebClients();                        // Есть ли активные клиенты?
-
-// ============================================================================
-// ЗАДАЧА FREERTOS
-// ============================================================================
-void taskWiFi(void* pvParameters);           // Задача для работы с WiFi и серверами
-
-#endif // WIFI_WEBSERVER_H
+#endif

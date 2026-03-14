@@ -2,23 +2,30 @@
 // wifi_webserver.cpp - Реализация WiFi, WebSocket и веб-сервера
 // ============================================================================
 
-#include "wifi_webserver.h"  // этот файл уже включает всё в правильном порядке
+#include <Arduino.h>
 #include <WiFi.h>
-#include <ESPmDNS.h>
+#include <DNSServer.h>
+#include <WiFiManager.h>
+#include <WebSocketsServer.h>
+#include <ESPAsyncWebServer.h>
 #include <LittleFS.h>
+#include <ESPmDNS.h>
 
-// Объявляем функцию из web_interface
-extern void webSocketEventHandler(uint8_t num, WStype_t type, uint8_t* payload, size_t length);
+#include "wifi_webserver.h"
+#include "web_interface.h"
 
 // ============================================================================
-// ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ МОДУЛЯ
+// ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ
 // ============================================================================
 WebSocketsServer webSocket(WEBSOCKET_PORT);
 AsyncWebServer server(80);
 bool clientConnected = false;
 
+// Внешняя функция из web_interface
+extern void webSocketEventHandler(uint8_t num, WStype_t type, uint8_t* payload, size_t length);
+
 // ============================================================================
-// ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ (JSON)
+// ФОРМИРОВАНИЕ JSON
 // ============================================================================
 static void buildJSON(const WebData& data, char* buffer, size_t bufferSize) {
   snprintf(buffer, bufferSize,
@@ -38,24 +45,61 @@ static void buildJSON(const WebData& data, char* buffer, size_t bufferSize) {
 }
 
 // ============================================================================
-// ОБЁРТКА ДЛЯ ВЫЗОВА ОБРАБОТЧИКА ИЗ WEB_INTERFACE
+// ОБРАБОТЧИК WEBSOCKET
 // ============================================================================
-static void onWebSocketEvent(uint8_t num, WStype_t type, uint8_t* payload, size_t length) {
-  // Вызываем функцию из web_interface.cpp
+void webSocketEvent(uint8_t num, WStype_t type, uint8_t* payload, size_t length) {
+  // Вызываем функцию из web_interface
   webSocketEventHandler(num, type, payload, length);
   
-  // Дополнительно отслеживаем подключения для флага clientConnected
   switch (type) {
     case WStype_DISCONNECTED:
       clientConnected = false;
       break;
-      
     case WStype_CONNECTED:
       clientConnected = true;
       break;
-      
     default:
       break;
+  }
+}
+
+// ============================================================================
+// ИНИЦИАЛИЗАЦИЯ ВЕБ-СЕРВЕРА
+// ============================================================================
+void initWebServer() {
+  if (!LittleFS.begin()) {
+    Serial.println("[WEB] ❌ Ошибка монтирования LittleFS!");
+    return;
+  }
+  Serial.println("[WEB] ✅ LittleFS смонтирована");
+
+  server.on("/", HTTP_GET, [](AsyncWebServerRequest* request) {
+    request->send(LittleFS, "/index.html", "text/html");
+  });
+
+  server.serveStatic("/", LittleFS, "/");
+  server.begin();
+  Serial.println("[WEB] ✅ Сервер запущен на порту 80");
+}
+
+// ============================================================================
+// ИНИЦИАЛИЗАЦИЯ WEBSOCKET
+// ============================================================================
+void initWebSocket() {
+  webSocket.begin();
+  webSocket.onEvent(webSocketEvent);
+  Serial.printf("[WiFi] WebSocket сервер запущен на порту %d\n", WEBSOCKET_PORT);
+}
+
+// ============================================================================
+// ИНИЦИАЛИЗАЦИЯ MDNS
+// ============================================================================
+void initMDNS() {
+  if (MDNS.begin("heatchamber")) {
+    Serial.println("[mDNS] ✅ http://heatchamber.local");
+    MDNS.addService("http", "tcp", 80);
+  } else {
+    Serial.println("[mDNS] ❌ Ошибка");
   }
 }
 
@@ -68,60 +112,20 @@ void initWiFiManager() {
   wm.setConnectTimeout(30);
   wm.setConfigPortalTimeout(180);
   
-  Serial.println("[WiFi] Подключение к сохранённой сети...");
+  Serial.println("[WiFi] Попытка подключения к сохранённой сети...");
   
   if (!wm.autoConnect("HeatChamber")) {
-    Serial.println("[WiFi] Ошибка подключения, перезагрузка...");
+    Serial.println("[WiFi] ❌ Ошибка подключения. Перезагрузка...");
     ESP.restart();
   }
-  
-  Serial.println("[WiFi] Подключено!");
-  Serial.printf("SSID: %s\n", WiFi.SSID().c_str());
-  Serial.printf("IP: %s\n", WiFi.localIP().toString().c_str());
+
+  Serial.println("[WiFi] ✅ Подключено!");
+  Serial.printf("[WiFi] SSID: %s\n", WiFi.SSID().c_str());
+  Serial.printf("[WiFi] IP адрес: %s\n", WiFi.localIP().toString().c_str());
 }
 
 // ============================================================================
-// ИНИЦИАЛИЗАЦИЯ MDNS
-// ============================================================================
-void initMDNS() {
-  if (MDNS.begin("heatchamber")) {
-    Serial.println("[mDNS] http://heatchamber.local");
-    MDNS.addService("http", "tcp", 80);
-  } else {
-    Serial.println("[mDNS] Ошибка");
-  }
-}
-
-// ============================================================================
-// ИНИЦИАЛИЗАЦИЯ ВЕБ-СЕРВЕРА
-// ============================================================================
-void initWebServer() {
-  if (!LittleFS.begin()) {
-    Serial.println("[WEB] Ошибка LittleFS");
-    return;
-  }
-  Serial.println("[WEB] LittleFS OK");
-
-  server.on("/", HTTP_GET, [](AsyncWebServerRequest* request) {
-    request->send(LittleFS, "/index.html", "text/html");
-  });
-
-  server.serveStatic("/", LittleFS, "/");
-  server.begin();
-  Serial.println("[WEB] Сервер на порту 80");
-}
-
-// ============================================================================
-// ИНИЦИАЛИЗАЦИЯ WEBSOCKET
-// ============================================================================
-void initWebSocket() {
-  webSocket.begin();
-  webSocket.onEvent(onWebSocketEvent);
-  Serial.printf("[WEB] WebSocket на порту %d\n", WEBSOCKET_PORT);
-}
-
-// ============================================================================
-// ОТПРАВКА ДАННЫХ КЛИЕНТАМ
+// ОТПРАВКА ДАННЫХ
 // ============================================================================
 void broadcastData(const WebData& data) {
   if (!clientConnected) return;
