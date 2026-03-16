@@ -37,7 +37,7 @@ extern TaskHandle_t buttonsTaskHandle;
 extern TaskHandle_t webTaskHandle;
 
 // ============================================================================
-// ПРОТОТИП задачи для Serial (реализация в serial_commands.cpp)
+// ПРОТОТИП задачи для Serial
 // ============================================================================
 void taskSerialCommands(void* pvParameters);
 
@@ -45,7 +45,9 @@ void taskSerialCommands(void* pvParameters);
 // ЗАДАЧА: ДИСПЛЕЙ (ядро 0, приоритет 2)
 // ============================================================================
 void taskDisplay(void* pvParameters) {
+#if DEBUG_SERIAL
   Serial.println(F("[DISPLAY] Task started on core 0, priority 2"));
+#endif
   
   while(1) {
     unsigned long now = millis();
@@ -72,7 +74,9 @@ void taskDisplay(void* pvParameters) {
 // ЗАДАЧА: ОПРОС ДАТЧИКОВ (ядро 1, приоритет 3)
 // ============================================================================
 void taskSensors(void* pvParameters) {
+#if DEBUG_SERIAL
   Serial.println(F("[SENSORS] Task started on core 1, priority 3"));
+#endif
   
   unsigned long lastRead = 0;
   unsigned long lastHistorySave = 0;
@@ -94,11 +98,14 @@ void taskSensors(void* pvParameters) {
         lastHistorySave = now;
       }
       
-      static unsigned long lastDebug = 0;
-      if (now - lastDebug >= 10000) {
-        lastDebug = now;
-        Serial.printf("[SENSORS] T0: %.2f, T1: %.2f, T2: %.2f\n", 
-                      sensorTemps[0], sensorTemps[1], sensorTemps[2]);
+      // Отладка датчиков по отдельному флагу
+      if (DEBUG_SENSORS) {
+        static unsigned long lastDebug = 0;
+        if (now - lastDebug >= 10000) {
+          lastDebug = now;
+          Serial.printf("[SENSORS] T0: %.2f, T1: %.2f, T2: %.2f\n", 
+                        sensorTemps[0], sensorTemps[1], sensorTemps[2]);
+        }
       }
     }
     
@@ -110,7 +117,9 @@ void taskSensors(void* pvParameters) {
 // ЗАДАЧА: УПРАВЛЕНИЕ НАГРЕВОМ (ПИД) (ядро 1, приоритет 3)
 // ============================================================================
 void taskHeaterControl(void* pvParameters) {
+#if DEBUG_SERIAL
   Serial.println(F("[HEATER] Task started on core 1, priority 3"));
+#endif
   
   unsigned long lastPID = 0;
   
@@ -125,11 +134,14 @@ void taskHeaterControl(void* pvParameters) {
         float power = (pidOut / 4096.0) * 100.0;
         setHeaterPower(power);
         
-        static unsigned long lastDebug = 0;
-        if (now - lastDebug >= 30000) {
-          lastDebug = now;
-          Serial.printf("[HEATER] Target: %.1f, Current: %.2f, Power: %.1f%%\n", 
-                        targetTemp, sensorTemps[0], power);
+        // Отладка нагрева по отдельному флагу
+        if (DEBUG_HEATER) {
+          static unsigned long lastDebug = 0;
+          if (now - lastDebug >= 30000) {
+            lastDebug = now;
+            Serial.printf("[HEATER] Target: %.1f, Current: %.2f, Power: %.1f%%\n", 
+                          targetTemp, sensorTemps[0], power);
+          }
         }
       } else {
         heaterOff();
@@ -151,6 +163,7 @@ void createAllTasks(
   bool* systemStatePtr,
   unsigned long* startMillisPtr
 ) {
+  // Эти сообщения важны при старте, оставим их всегда
   Serial.println(F("\n[RTOS] Creating all tasks..."));
 
   // --------------------------------------------------------------------------
@@ -221,9 +234,9 @@ void createAllTasks(
   Serial.println(F("OK"));
 
   // --------------------------------------------------------------------------
-  // ЗАДАЧА 6: SERIAL (ядро 0, приоритет 1) - реализация в serial_commands.cpp
+  // ЗАДАЧА 6: SERIAL (ядро 0, приоритет 1)
   // --------------------------------------------------------------------------
-  Serial.print(F("   Serial task (core 0, prio 1, stack 2048) ... "));
+  Serial.print(F("   Serial task (core 0, prio 1, stack 4096) ... "));
   xTaskCreatePinnedToCore(
     taskSerialCommands,
     "serialTask", 

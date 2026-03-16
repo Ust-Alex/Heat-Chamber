@@ -42,17 +42,17 @@ bool ntpSyncDone = false;
 unsigned long lastNTPAttempt = 0;
 
 // ============================================================================
-// ИНИЦИАЛИЗАЦИЯ NTP (НЕБЛОКИРУЮЩАЯ)
+// ИНИЦИАЛИЗАЦИЯ NTP
 // ============================================================================
 void initNTP() {
   if (!isWiFiConnected()) {
-    Serial.println(F("⚠️ WiFi не подключён, NTP отложен"));
+    if (DEBUG_NTP) Serial.println(F("⚠️ WiFi не подключён, NTP отложен"));
     return;
   }
   
-  Serial.print(F("[NTP] Синхронизация времени... "));
+  if (DEBUG_NTP) Serial.print(F("[NTP] Синхронизация времени... "));
   configTime(TIMEZONE_OFFSET, 0, NTP_SERVER1, NTP_SERVER2);
-  Serial.println(F("запущена (фоновая)"));
+  if (DEBUG_NTP) Serial.println(F("запущена (фоновая)"));
   ntpSyncDone = false;
   lastNTPAttempt = millis();
 }
@@ -63,16 +63,14 @@ void initNTP() {
 String getCurrentTimeString() {
   static char timeStr[9] = "00:00:00";
   
-  // Пробуем получить время, но не чаще чем раз в 30 секунд
   if (!ntpSyncDone && isWiFiConnected() && millis() - lastNTPAttempt > 30000) {
     if (getLocalTime(&timeinfo)) {
       strftime(timeStr, sizeof(timeStr), "%H:%M:%S", &timeinfo);
       ntpSyncDone = true;
-      Serial.printf("[NTP] Время синхронизировано: %s\n", timeStr);
+      if (DEBUG_NTP) Serial.printf("[NTP] Время синхронизировано: %s\n", timeStr);
     }
     lastNTPAttempt = millis();
   } else if (ntpSyncDone) {
-    // Если время уже получено, просто обновляем строку
     getLocalTime(&timeinfo);
     strftime(timeStr, sizeof(timeStr), "%H:%M:%S", &timeinfo);
   }
@@ -94,7 +92,7 @@ void addHistoryPoint(float s0, float s1, float s2, float tgt) {
     time_t t = time(nullptr);
     p.timestamp = t;
   } else {
-    p.timestamp = millis() / 1000;  // fallback
+    p.timestamp = millis() / 1000;
   }
   
   historyIndex = (historyIndex + 1) % HISTORY_SIZE;
@@ -126,9 +124,9 @@ void sendFullHistory(uint8_t clientNum) {
   serializeJson(doc, json);
   webSocket.sendTXT(clientNum, json);
   
-#if DEBUG_SERIAL
-  Serial.printf("[HISTORY] Отправлено %d точек клиенту %u\n", historyCount, clientNum);
-#endif
+  if (DEBUG_WEB) {
+    Serial.printf("[HISTORY] Отправлено %d точек клиенту %u\n", historyCount, clientNum);
+  }
 }
 
 // ============================================================================
@@ -154,15 +152,15 @@ static void buildJSON(const WebData& data, char* buffer, size_t bufferSize) {
            ntpTime.c_str(),
            data.power, data.duty);
 
-#if DEBUG_SERIAL
-  static uint32_t lastDebugTime = 0;
-  uint32_t now = millis();
-  if (now - lastDebugTime >= 10000) {
-    Serial.print(F("[WEB] JSON: "));
-    Serial.println(buffer);
-    lastDebugTime = now;
+  if (DEBUG_WEB) {
+    static uint32_t lastDebugTime = 0;
+    uint32_t now = millis();
+    if (now - lastDebugTime >= 10000) {
+      Serial.print(F("[WEB] JSON: "));
+      Serial.println(buffer);
+      lastDebugTime = now;
+    }
   }
-#endif
 }
 
 // ============================================================================
@@ -175,16 +173,12 @@ static void onWebSocketEvent(uint8_t num, WStype_t type, uint8_t* payload, size_
   switch (type) {
     case WStype_DISCONNECTED:
       clientConnected = false;
-#if DEBUG_SERIAL
-      Serial.printf("[WEB] Клиент %u отключился\n", num);
-#endif
+      if (DEBUG_WEB) Serial.printf("[WEB] Клиент %u отключился\n", num);
       break;
 
     case WStype_CONNECTED:
       clientConnected = true;
-#if DEBUG_SERIAL
-      Serial.printf("[WEB] Клиент %u подключился\n", num);
-#endif
+      if (DEBUG_WEB) Serial.printf("[WEB] Клиент %u подключился\n", num);
       sendFullHistory(num);
       break;
 
@@ -256,7 +250,7 @@ bool hasWebClients() {
 // ЗАДАЧА FREERTOS
 // ============================================================================
 void taskWebServer(void* pvParameters) {
-  Serial.println(F("[TASK] WebServer задача запущена"));
+  if (DEBUG_SERIAL) Serial.println(F("[TASK] WebServer задача запущена"));
 
   extern float sensorTemps[MAX_SENSORS];
   extern float targetTemp;

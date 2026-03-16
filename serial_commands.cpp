@@ -11,7 +11,7 @@ extern float targetTemp;
 extern bool systemState;
 
 void taskSerialCommands(void* pvParameters) {
-    Serial.println(F("[SERIAL] Task started"));
+    // Убрал лишнее сообщение о старте задачи, его и так видно в rtos_tasks
     String input = "";
     
     while(1) {

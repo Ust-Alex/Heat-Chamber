@@ -29,17 +29,11 @@
 #define TEMP_UPDATE_INTERVAL 1000
 
 // ============================================================================
-// НАСТРОЙКИ ИСТОРИИ (НОВЫЕ)
+// НАСТРОЙКИ ИСТОРИИ
 // ============================================================================
-// #define HISTORY_INTERVAL   3000    // 3 секунды между сохранениями в историю
-// #define HISTORY_SIZE       3600    // 3 часа при интервале 3 сек (3600 точек)
-#define HISTORY_INTERVAL   4000    // 4 секунды между сохранениями в историю
-#define HISTORY_SIZE       2700    // 3 часа при интервале 4 сек (2700 точек)
-// #define HISTORY_INTERVAL   5000    // 5 секунд  
-// #define HISTORY_SIZE       2160    // 3 часа при 5 сек
-
+#define HISTORY_INTERVAL   4000    // 4 секунды между сохранениями
+#define HISTORY_SIZE       2700    // 3 часа при интервале 4 сек
 #define HISTORY_FILE      "/history.dat"
-
 
 // ============================================================================
 // НАСТРОЙКИ ГРАФИКОВ НА ДИСПЛЕЕ
@@ -76,15 +70,10 @@
 // ============================================================================
 // НАСТРОЙКИ NTP
 // ============================================================================
-// #define NTP_SERVER1       "pool.ntp.org"
-// #define NTP_SERVER2       "time.nist.gov"
-#define NTP_SERVER1       "ntp1.vniiftri.ru"     // ВНИИФТРИ (Россия)
-#define NTP_SERVER2       "ntp.msk-ix.ru"        // MSK-IX
-#define NTP_SERVER3       "time.windows.com"     // Microsoft
-
-
-
-#define TIMEZONE_OFFSET   10800   // UTC+3 в секундах
+#define NTP_SERVER1       "ntp1.vniiftri.ru"
+#define NTP_SERVER2       "ntp.msk-ix.ru"
+#define NTP_SERVER3       "time.windows.com"
+#define TIMEZONE_OFFSET   10800   // UTC+3
 
 // ============================================================================
 // НАСТРОЙКИ WiFi
@@ -102,8 +91,12 @@
 #define WEB_SERVER_PORT   80
 
 // ============================================================================
-// НАСТРОЙКИ ОТЛАДКИ
+// *** НОВЫЕ ФЛАГИ ОТЛАДКИ ***
 // ============================================================================
-#define DEBUG_SERIAL      1
+#define DEBUG_SERIAL      0   // Общий: 0 - отключено, 1 - включено
+#define DEBUG_SENSORS     0   // Отладка датчиков (T0,T1,T2)
+#define DEBUG_HEATER      0   // Отладка нагрева (PID, мощность)
+#define DEBUG_WEB         0   // Отладка веб-сервера (JSON, клиенты)
+#define DEBUG_NTP         0   // Отладка синхронизации времени
 
 #endif // CONFIG_H
