@@ -3,9 +3,12 @@
 // ============================================================================
 
 #include "rtos_tasks.h"
+#include "web_server.h"
+#include "serial_commands.h"
+#include "config.h"
 
 // ============================================================================
-// ВНЕШНИЕ ПЕРЕМЕННЫЕ (определены в основном файле)
+// ВНЕШНИЕ ПЕРЕМЕННЫЕ
 // ============================================================================
 extern U8G2_ST7920_128X64_F_HW_SPI u8g2;
 extern OneWire oneWire;
@@ -25,11 +28,18 @@ extern unsigned long lastGraphDraw;
 extern unsigned long lastTempUpdate;
 extern unsigned long lastPIDUpdate;
 
+extern float currentPower;
+
 // ============================================================================
-// ДЕСКРИПТОРЫ ЗАДАЧ (extern, т.к. определены в основном файле)
+// ДЕСКРИПТОРЫ ЗАДАЧ
 // ============================================================================
 extern TaskHandle_t buttonsTaskHandle;
 extern TaskHandle_t webTaskHandle;
+
+// ============================================================================
+// ПРОТОТИП задачи для Serial (реализация в serial_commands.cpp)
+// ============================================================================
+void taskSerialCommands(void* pvParameters);
 
 // ============================================================================
 // ЗАДАЧА: ДИСПЛЕЙ (ядро 0, приоритет 2)
@@ -65,6 +75,7 @@ void taskSensors(void* pvParameters) {
   Serial.println(F("[SENSORS] Task started on core 1, priority 3"));
   
   unsigned long lastRead = 0;
+  unsigned long lastHistorySave = 0;
   
   while(1) {
     unsigned long now = millis();
@@ -76,6 +87,11 @@ void taskSensors(void* pvParameters) {
       
       for (uint8_t i = 0; i < sensorCount; i++) {
         sensorTemps[i] = readTemperature(&sensors, sensorAddresses, i);
+      }
+      
+      if (now - lastHistorySave >= HISTORY_INTERVAL) {
+        addHistoryPoint(sensorTemps[0], sensorTemps[1], sensorTemps[2], targetTemp);
+        lastHistorySave = now;
       }
       
       static unsigned long lastDebug = 0;
@@ -106,7 +122,7 @@ void taskHeaterControl(void* pvParameters) {
       
       if (systemState && !isnan(sensorTemps[0]) && sensorTemps[0] > 0) {
         float pidOut = PIDregulator.compute(sensorTemps[0]);
-        float power = (pidOut / 4096.0) * 100.0;  // 4096 = MAX_DUTY/2
+        float power = (pidOut / 4096.0) * 100.0;
         setHeaterPower(power);
         
         static unsigned long lastDebug = 0;
@@ -166,7 +182,6 @@ void createAllTasks(
   // ЗАДАЧА 3: WiFi/ВЕБ (ядро 1, приоритет 3)
   // --------------------------------------------------------------------------
   Serial.print(F("   WiFi task (core 1, prio 3, stack 8192) ... "));
-  // Функция taskWebServer определена в web_server.cpp
   xTaskCreatePinnedToCore(
     taskWebServer, 
     "webTask", 
@@ -203,6 +218,20 @@ void createAllTasks(
     3,
     NULL, 
     1);
+  Serial.println(F("OK"));
+
+  // --------------------------------------------------------------------------
+  // ЗАДАЧА 6: SERIAL (ядро 0, приоритет 1) - реализация в serial_commands.cpp
+  // --------------------------------------------------------------------------
+  Serial.print(F("   Serial task (core 0, prio 1, stack 2048) ... "));
+  xTaskCreatePinnedToCore(
+    taskSerialCommands,
+    "serialTask", 
+    4096,
+    NULL, 
+    1,
+    NULL, 
+    0);
   Serial.println(F("OK"));
 
   Serial.println(F("[RTOS] All tasks created"));

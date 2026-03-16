@@ -3,6 +3,8 @@
 // ============================================================================
 
 #include "sensors_core.h"
+#include "web_server.h"
+#include "config.h"
 
 // ============================================================================
 // ИНИЦИАЛИЗАЦИЯ
@@ -13,10 +15,9 @@ uint8_t initSensors(DallasTemperature* sensors, DeviceAddress* addresses) {
   uint8_t found = sensors->getDeviceCount();
   uint8_t used = 0;
 
-  // Настраиваем не больше MAX_SENSORS датчиков
   for (uint8_t i = 0; i < min(found, (uint8_t)MAX_SENSORS); i++) {
     if (sensors->getAddress(addresses[i], i)) {
-      sensors->setResolution(addresses[i], 12);  // максимальное разрешение
+      sensors->setResolution(addresses[i], 12);
       used++;
     }
   }
@@ -35,8 +36,6 @@ float readTemperature(DallasTemperature* sensors, DeviceAddress* addresses, uint
   if (index >= MAX_SENSORS) return NAN;
   
   float temp = sensors->getTempC(addresses[index]);
-  
-  // DEVICE_DISCONNECTED_C возвращается при ошибке (-127)
   return (temp == DEVICE_DISCONNECTED_C) ? NAN : temp;
 }
 

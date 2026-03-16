@@ -5,24 +5,17 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Термический реформинг</title>
     
-    <!-- Chart.js -->
-    <script src="chart.umd.min.js"></script>
-    
-    <!-- Hammer.js для жестов -->
-    <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8"></script>
-    
-    <!-- Плагин зума -->
-    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
-    
+    <!-- СТИЛИ ПОДКЛЮЧАЕМ В HEAD (это правильно) -->
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <!-- ============================================ -->
     <!-- ВЕРХНЯЯ ПАНЕЛЬ -->
-    <!-- ============================================ -->
     <div class="window window-header" id="windowHeader">
         <div class="top-bar">
-            <div class="top-left">Термический реформинг</div>
+            <div class="top-left">
+                Термический реформинг
+                <span class="live-time" id="ntpTime" style="margin-left: 10px; color: #ffaa00;">00:00:00</span>
+            </div>
             <div class="top-center" id="topSetpoint">30.0°C</div>
             <div class="top-right">
                 <span class="top-time" id="topTime">00:00</span>
@@ -31,39 +24,30 @@
         </div>
     </div>
 
-    <!-- ============================================ -->
-    <!-- ЛЕВАЯ ПАНЕЛЬ УПРАВЛЕНИЯ -->
-    <!-- ============================================ -->
+    <!-- ЛЕВАЯ ПАНЕЛЬ -->
     <div class="window window-left" id="windowLeft">
         <div class="left-panel">
-            
-            <!-- Температуры датчиков (3 штуки, только цифры) -->
             <div class="sensor-temp" id="sensor1" style="color: #00FF00;">--.-</div>
             <div class="sensor-temp" id="sensor2" style="color: #FFFF00;">--.-</div>
             <div class="sensor-temp" id="sensor3" style="color: #FFA500;">--.-</div>
             
-            <!-- Кнопка ВКЛ/ВЫКЛ -->
             <button class="power-btn" id="btnPower">ВКЛ</button>
             
-            <!-- Установка температуры -->
             <div class="setpoint-block">
                 <div class="setpoint-label">T°C</div>
-                <input type="number" id="setpointInput" value="30.0" step="1.0" min="30.0" max="70.0">
+                <input type="text" id="setpointInput" value="30" inputmode="numeric" pattern="[0-9]*">
             </div>
             
-            <!-- Мощность нагрева -->
             <div class="power-block">
                 <div class="power-label">Мощность</div>
                 <div class="power-value" id="powerValue">0.0% (0)</div>
             </div>
             
-            <!-- Таймер работы -->
             <div class="timer-block">
                 <div class="timer-label">Время</div>
                 <div class="timer-value" id="timerValue">00:00</div>
             </div>
             
-            <!-- WiFi индикатор (дубль на всякий случай, но основной уже вверху) -->
             <div class="wifi-block">
                 <span class="wifi-dot" id="wifiDotLeft"></span>
                 <span class="wifi-text" id="wifiText">WiFi</span>
@@ -71,11 +55,8 @@
         </div>
     </div>
 
-    <!-- ============================================ -->
-    <!-- ОКНО ГРАФИКА -->
-    <!-- ============================================ -->
+    <!-- ГРАФИК -->
     <div class="window window-graph" id="windowGraph">
-        <!-- Кнопки масштаба (внутри окна графика, сверху) -->
         <div class="graph-toolbar">
             <button class="scale-btn" data-range="10">10м</button>
             <button class="scale-btn active" data-range="30">30м</button>
@@ -86,18 +67,16 @@
         <canvas id="tempChart"></canvas>
     </div>
 
-    <!-- ============================================ -->
-    <!-- НИЖНЯЯ ПАНЕЛЬ (ОТЛАДКА) -->
-    <!-- ============================================ -->
+    <!-- НИЖНЯЯ ПАНЕЛЬ -->
     <div class="window window-debug" id="windowDebug">
         <div class="debug-bar">
-            <span>Буфер: <span class="debug-value" id="debugBuffer">0/7200</span></span>
+            <span>Буфер: <span class="debug-value" id="debugBuffer">0/2700</span></span>
             <span>Датчики: <span class="debug-value" id="debugSensors">3</span></span>
             <span>Режим: <span class="debug-value" id="debugMode">Работа</span></span>
         </div>
     </div>
 
-    <!-- Модальное окно (оставим на случай, если понадобится) -->
+    <!-- МОДАЛЬНОЕ ОКНО -->
     <div id="targetModal" class="modal" style="display:none;">
         <div class="modal-content">
             <span class="close">&times;</span>
@@ -107,6 +86,20 @@
         </div>
     </div>
 
-    <script src="script.js"></script>
+    <!-- ============================================ -->
+    <!-- СКРИПТЫ ПОДКЛЮЧАЕМ В САМОМ КОНЦЕ (ПОСЛЕ DOM) -->
+    <!-- ============================================ -->
+    <script src="chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
+    
+    <!-- Модули приложения (порядок важен!) -->
+    <script src="js/config.js"></script>
+    <script src="js/state.js"></script>
+    <script src="js/chart.js"></script>
+    <script src="js/ui.js"></script>
+    <script src="js/websocket.js"></script>
+    <script src="js/controls.js"></script>
+    <script src="js/main.js"></script>
 </body>
 </html>

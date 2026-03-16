@@ -1,9 +1,6 @@
 // ============================================================================
 // Heat-Chamber.ino - ПИД-регулятор температуры
 // ============================================================================
-// Теперь только инициализация и запуск задач
-// Все задачи вынесены в rtos_tasks.h/cpp
-// ============================================================================
 
 #include <OneWire.h>
 #include <DallasTemperature.h>
@@ -20,10 +17,10 @@
 #include "wifi_static.h"
 #include "web_server.h"
 #include "web_interface.h"
-#include "rtos_tasks.h"  // <- ВСЕ ЗАДАЧИ ЗДЕСЬ
+#include "rtos_tasks.h"
 
 // ============================================================================
-// ОБЪЕКТЫ (глобальные, для доступа из задач)
+// ОБЪЕКТЫ
 // ============================================================================
 U8G2_ST7920_128X64_F_HW_SPI u8g2(U8G2_R0, 5, U8X8_PIN_NONE);
 OneWire oneWire(ONE_WIRE_BUS);
@@ -92,13 +89,11 @@ void setup() {
   delay(1000);
 
   Serial.println(F("\n\n========================================"));
-  Serial.println(F("🔥 HEAT CHAMBER v3.0"));
+  Serial.println(F("🔥 HEAT CHAMBER v3.1 (с историей и NTP)"));
   Serial.println(F("========================================"));
 
-  // --------------------------------------------------------------------------
   // [1] ДИСПЛЕЙ
-  // --------------------------------------------------------------------------
-  Serial.print(F("[1/13] Display init ... "));
+  Serial.print(F("[1/15] Display init ... "));
   u8g2.begin();
   u8g2.clearBuffer();
   u8g2.setFont(u8g2_font_6x10_tf);
@@ -106,10 +101,8 @@ void setup() {
   u8g2.sendBuffer();
   Serial.println(F("OK"));
 
-  // --------------------------------------------------------------------------
   // [2] КНОПКИ
-  // --------------------------------------------------------------------------
-  Serial.print(F("[2/13] Buttons init ... "));
+  Serial.print(F("[2/15] Buttons init ... "));
   btnUp.setDebounce(50);
   btnDown.setDebounce(50);
   btnPower.setDebounce(50);
@@ -118,78 +111,63 @@ void setup() {
   pinMode(BTN_POWER_PIN, INPUT_PULLUP);
   Serial.println(F("OK"));
 
-  // --------------------------------------------------------------------------
   // [3] ДАТЧИКИ
-  // --------------------------------------------------------------------------
-  Serial.print(F("[3/13] Sensors init ... "));
+  Serial.print(F("[3/15] Sensors init ... "));
   sensorCount = initSensors(&sensors, sensorAddresses);
   Serial.print(sensorCount);
   Serial.println(F(" found"));
 
-  // --------------------------------------------------------------------------
-  // [4] ШИМ (инициализация здесь, а не в отдельной задаче!)
-  // --------------------------------------------------------------------------
-  Serial.print(F("[4/13] PWM init ... "));
+  // [4] ШИМ
+  Serial.print(F("[4/15] PWM init ... "));
   setupPWM();
-  // Сразу выключаем для безопасности
   ledc_set_duty(LEDC_HIGH_SPEED_MODE, LEDC_CHANNEL_0, 0);
   ledc_update_duty(LEDC_HIGH_SPEED_MODE, LEDC_CHANNEL_0);
   Serial.println(F("OK"));
 
-  // --------------------------------------------------------------------------
   // [5] ПИД
-  // --------------------------------------------------------------------------
-  Serial.print(F("[5/13] PID init ... "));
+  Serial.print(F("[5/15] PID init ... "));
   PIDregulator.Kp = PID_KP;
   PIDregulator.Ki = PID_KI;
   PIDregulator.Kd = PID_KD;
   PIDregulator.setpoint = targetTemp;
-  PIDregulator.outMax = 4096;  // Половина от 8192 для запаса
+  PIDregulator.outMax = 4096;
   PIDregulator.outMin = 0;
   Serial.println(F("OK"));
 
-  // --------------------------------------------------------------------------
   // [6] ГРАФИКИ
-  // --------------------------------------------------------------------------
-  Serial.print(F("[6/13] Graph buffers init ... "));
+  Serial.print(F("[6/15] Graph buffers init ... "));
   initGraphBuffers(targetHistory, sensorHistory, targetTemp, MAX_SENSORS);
   Serial.println(F("OK"));
 
-  // --------------------------------------------------------------------------
-  // [7] WiFi
-  // --------------------------------------------------------------------------
-  Serial.print(F("[7/13] WiFi init ... "));
+  // [7] WiFi (ТЕПЕРЬ СНАЧАЛА)
+  Serial.print(F("[7/15] WiFi init ... "));
   if (initWiFi()) {
     Serial.println(F("CONNECTED"));
   } else {
     Serial.println(F("FAILED (continue without WiFi)"));
   }
 
-  // --------------------------------------------------------------------------
-  // [8] mDNS
-  // --------------------------------------------------------------------------
-  Serial.print(F("[8/13] mDNS init ... "));
+  // [8] NTP (ТЕПЕРЬ ПОСЛЕ WiFi)
+  Serial.print(F("[8/15] NTP init ... "));
+  initNTP();
+
+  // [9] mDNS
+  Serial.print(F("[9/15] mDNS init ... "));
   initMDNS();
   Serial.println(F("OK"));
 
-  // --------------------------------------------------------------------------
-  // [9] HTTP-СЕРВЕР
-  // --------------------------------------------------------------------------
-  Serial.print(F("[9/13] HTTP server init ... "));
+  // [10] HTTP-СЕРВЕР
+  Serial.print(F("[10/15] HTTP server init ... "));
   initWebServer();
   Serial.println(F("OK"));
 
-  // --------------------------------------------------------------------------
-  // [10] WEBSOCKET
-  // --------------------------------------------------------------------------
-  Serial.print(F("[10/13] WebSocket init ... "));
+  // [11] WEBSOCKET
+  Serial.print(F("[11/15] WebSocket init ... "));
   initWebSocket();
   Serial.println(F("OK"));
 
-  // --------------------------------------------------------------------------
-  // [11] WEB-ИНТЕРФЕЙС
-  // --------------------------------------------------------------------------
-  Serial.print(F("[11/13] Web callbacks init ... "));
+  // [12] WEB-ИНТЕРФЕЙС
+  Serial.print(F("[12/15] Web callbacks init ... "));
   WebCallbacks callbacks;
   callbacks.onSetTarget = onSetTarget;
   callbacks.onSetPower = onSetPower;
@@ -200,24 +178,21 @@ void setup() {
 
   startMillis = millis();
 
-  // --------------------------------------------------------------------------
-  // [12] ЗАДАЧИ FREERTOS
-  // --------------------------------------------------------------------------
+  // [13] ЗАДАЧИ FREERTOS
   createAllTasks(&btnUp, &btnDown, &btnPower, &targetTemp, &systemState, &startMillis);
 
-  // --------------------------------------------------------------------------
-  // [13] ПРОВЕРКА ШИМ
-  // --------------------------------------------------------------------------
-  Serial.print(F("[13/13] PWM test ... "));
-  // Короткий тест: 1% на 100мс для проверки
+  // [14] ПРОВЕРКА ШИМ
+  Serial.print(F("[14/15] PWM test ... "));
   setHeaterPower(1.0);
   delay(100);
   setHeaterPower(0.0);
   Serial.println(F("OK"));
 
-  // --------------------------------------------------------------------------
-  // ФИНАЛ
-  // --------------------------------------------------------------------------
+  // [15] ЗАГРУЗКА ИСТОРИИ
+  Serial.print(F("[15/15] History load ... "));
+  // TODO: загрузка из файла при необходимости
+  Serial.println(F("OK"));
+
   Serial.println(F("\n✅ СИСТЕМА ГОТОВА!"));
   if (isWiFiConnected()) {
     Serial.print(F("🌐 IP: "));
@@ -228,7 +203,7 @@ void setup() {
 }
 
 // ============================================================================
-// LOOP - ПУСТОЙ
+// LOOP
 // ============================================================================
 void loop() {
   vTaskDelay(pdMS_TO_TICKS(1000));

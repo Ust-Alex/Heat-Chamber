@@ -1,7 +1,5 @@
 // ============================================================================
-// web_server.cpp - Реализация веб-сервера
-// ============================================================================
-// Проект: Heat-Chamber
+// web_server.cpp - Реализация веб-сервера (с историей и NTP)
 // ============================================================================
 
 #include <Arduino.h>
@@ -10,10 +8,12 @@
 #include <ESPAsyncWebServer.h>
 #include <LittleFS.h>
 #include <ESPmDNS.h>
+#include <time.h>
 
 #include "web_server.h"
 #include "web_interface.h"
-#include "config.h"  // для MAX_SENSORS
+#include "wifi_static.h"
+#include "config.h"
 
 // ============================================================================
 // ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ
@@ -23,13 +23,120 @@ AsyncWebServer server(WEB_SERVER_PORT);
 bool clientConnected = false;
 
 extern void webSocketEventHandler(uint8_t num, WStype_t type, uint8_t* payload, size_t length);
-extern float currentPower;    // текущая мощность в %
-extern uint32_t currentDuty;  // текущее значение ШИМ
+extern float currentPower;
+extern uint32_t currentDuty;
+
+// ============================================================================
+// БУФЕР ИСТОРИИ
+// ============================================================================
+HistoryPoint historyBuffer[HISTORY_SIZE];
+int historyIndex = 0;
+int historyCount = 0;
+
+// ============================================================================
+// NTP ВРЕМЯ
+// ============================================================================
+time_t now;
+struct tm timeinfo;
+bool ntpSyncDone = false;
+unsigned long lastNTPAttempt = 0;
+
+// ============================================================================
+// ИНИЦИАЛИЗАЦИЯ NTP (НЕБЛОКИРУЮЩАЯ)
+// ============================================================================
+void initNTP() {
+  if (!isWiFiConnected()) {
+    Serial.println(F("⚠️ WiFi не подключён, NTP отложен"));
+    return;
+  }
+  
+  Serial.print(F("[NTP] Синхронизация времени... "));
+  configTime(TIMEZONE_OFFSET, 0, NTP_SERVER1, NTP_SERVER2);
+  Serial.println(F("запущена (фоновая)"));
+  ntpSyncDone = false;
+  lastNTPAttempt = millis();
+}
+
+// ============================================================================
+// ПОЛУЧИТЬ ТЕКУЩЕЕ ВРЕМЯ В ВИДЕ СТРОКИ
+// ============================================================================
+String getCurrentTimeString() {
+  static char timeStr[9] = "00:00:00";
+  
+  // Пробуем получить время, но не чаще чем раз в 30 секунд
+  if (!ntpSyncDone && isWiFiConnected() && millis() - lastNTPAttempt > 30000) {
+    if (getLocalTime(&timeinfo)) {
+      strftime(timeStr, sizeof(timeStr), "%H:%M:%S", &timeinfo);
+      ntpSyncDone = true;
+      Serial.printf("[NTP] Время синхронизировано: %s\n", timeStr);
+    }
+    lastNTPAttempt = millis();
+  } else if (ntpSyncDone) {
+    // Если время уже получено, просто обновляем строку
+    getLocalTime(&timeinfo);
+    strftime(timeStr, sizeof(timeStr), "%H:%M:%S", &timeinfo);
+  }
+  
+  return String(timeStr);
+}
+
+// ============================================================================
+// ДОБАВЛЕНИЕ ТОЧКИ В ИСТОРИЮ
+// ============================================================================
+void addHistoryPoint(float s0, float s1, float s2, float tgt) {
+  HistoryPoint& p = historyBuffer[historyIndex];
+  p.sensor0 = s0;
+  p.sensor1 = s1;
+  p.sensor2 = s2;
+  p.target = tgt;
+  
+  if (ntpSyncDone) {
+    time_t t = time(nullptr);
+    p.timestamp = t;
+  } else {
+    p.timestamp = millis() / 1000;  // fallback
+  }
+  
+  historyIndex = (historyIndex + 1) % HISTORY_SIZE;
+  if (historyCount < HISTORY_SIZE) historyCount++;
+}
+
+// ============================================================================
+// ОТПРАВКА ВСЕЙ ИСТОРИИ КЛИЕНТУ
+// ============================================================================
+void sendFullHistory(uint8_t clientNum) {
+  if (historyCount == 0) return;
+  
+  DynamicJsonDocument doc(historyCount * 60 + 512);
+  JsonArray history = doc.createNestedArray("history");
+  
+  int startIdx = (historyIndex - historyCount + HISTORY_SIZE) % HISTORY_SIZE;
+  
+  for (int i = 0; i < historyCount; i++) {
+    int idx = (startIdx + i) % HISTORY_SIZE;
+    JsonObject point = history.createNestedObject();
+    point["sensor0"] = historyBuffer[idx].sensor0;
+    point["sensor1"] = historyBuffer[idx].sensor1;
+    point["sensor2"] = historyBuffer[idx].sensor2;
+    point["target"] = historyBuffer[idx].target;
+    point["time"] = historyBuffer[idx].timestamp;
+  }
+  
+  String json;
+  serializeJson(doc, json);
+  webSocket.sendTXT(clientNum, json);
+  
+#if DEBUG_SERIAL
+  Serial.printf("[HISTORY] Отправлено %d точек клиенту %u\n", historyCount, clientNum);
+#endif
+}
 
 // ============================================================================
 // ФОРМИРОВАНИЕ JSON
 // ============================================================================
 static void buildJSON(const WebData& data, char* buffer, size_t bufferSize) {
+  String ntpTime = getCurrentTimeString();
+  
   snprintf(buffer, bufferSize,
            "{"
            "\"sensor0\":%.2f,"
@@ -38,19 +145,18 @@ static void buildJSON(const WebData& data, char* buffer, size_t bufferSize) {
            "\"target\":%.2f,"
            "\"state\":%d,"
            "\"time\":\"%s\","
+           "\"ntpTime\":\"%s\","
            "\"power\":%.1f,"
            "\"duty\":%u"
            "}",
            data.temps[0], data.temps[1], data.temps[2],
            data.target, data.state, data.timeStr,
+           ntpTime.c_str(),
            data.power, data.duty);
 
 #if DEBUG_SERIAL
-  // Статическая переменная сохраняет значение между вызовами
   static uint32_t lastDebugTime = 0;
   uint32_t now = millis();
-
-  // Выводим не чаще чем раз в 10000 мс (10 секунд)
   if (now - lastDebugTime >= 10000) {
     Serial.print(F("[WEB] JSON: "));
     Serial.println(buffer);
@@ -79,6 +185,7 @@ static void onWebSocketEvent(uint8_t num, WStype_t type, uint8_t* payload, size_
 #if DEBUG_SERIAL
       Serial.printf("[WEB] Клиент %u подключился\n", num);
 #endif
+      sendFullHistory(num);
       break;
 
     default:
@@ -94,24 +201,17 @@ void initWebServer() {
   Serial.println(F("🌐 ЗАПУСК ВЕБ-СЕРВЕРА"));
   Serial.println(F("========================================"));
 
-  // Монтируем LittleFS
-  Serial.print(F("📁 LittleFS ... "));
   if (!LittleFS.begin()) {
-    Serial.println(F("❌ ОШИБКА"));
-    Serial.println(F("   Веб-интерфейс не будет доступен!"));
+    Serial.println(F("❌ ОШИБКА LittleFS"));
     return;
   }
-  Serial.println(F("✅ OK"));
+  Serial.println(F("✅ LittleFS OK"));
 
-  // Главная страница
   server.on("/", HTTP_GET, [](AsyncWebServerRequest* request) {
     request->send(LittleFS, "/index.html", "text/html");
   });
 
-  // Статические файлы
   server.serveStatic("/", LittleFS, "/");
-
-  // Запуск
   server.begin();
   Serial.println(F("✅ Сервер запущен"));
 }
@@ -143,7 +243,7 @@ void initMDNS() {
 void broadcastData(const WebData& data) {
   if (!clientConnected) return;
 
-  char buffer[128];
+  char buffer[192];
   buildJSON(data, buffer, sizeof(buffer));
   webSocket.broadcastTXT(buffer);
 }
@@ -158,7 +258,6 @@ bool hasWebClients() {
 void taskWebServer(void* pvParameters) {
   Serial.println(F("[TASK] WebServer задача запущена"));
 
-  // Доступ к глобальным переменным из .ino файла
   extern float sensorTemps[MAX_SENSORS];
   extern float targetTemp;
   extern bool systemState;
@@ -168,12 +267,10 @@ void taskWebServer(void* pvParameters) {
 
   uint32_t lastSend = 0;
 
-  // Вспомогательная функция для формирования строки времени ЧЧ:ММ
   auto getTimeString = [](unsigned long start) -> const char* {
     static char timeStr[6] = "00:00";
     if (start == 0) return "00:00";
-
-    unsigned long elapsed = (millis() - start) / 60000;  // минуты
+    unsigned long elapsed = (millis() - start) / 60000;
     unsigned long hours = elapsed / 60;
     unsigned long minutes = elapsed % 60;
     snprintf(timeStr, sizeof(timeStr), "%02lu:%02lu", hours, minutes);
@@ -184,18 +281,17 @@ void taskWebServer(void* pvParameters) {
     webSocket.loop();
 
     uint32_t now = millis();
-    // Отправляем данные раз в секунду, если есть клиенты
     if (now - lastSend >= 1000) {
       if (isWebClientConnected()) {
         sendWebData(
-          sensorTemps[0],              // t0
-          sensorTemps[1],              // t1
-          sensorTemps[2],              // t2
-          targetTemp,                  // target
-          systemState,                 // state
-          getTimeString(startMillis),  // timeStr
-          currentPower,                // power
-          currentDuty                  // duty
+          sensorTemps[0],
+          sensorTemps[1],
+          sensorTemps[2],
+          targetTemp,
+          systemState,
+          getTimeString(startMillis),
+          currentPower,
+          currentDuty
         );
       }
       lastSend = now;

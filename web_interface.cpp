@@ -1,14 +1,13 @@
 // ============================================================================
 // web_interface.cpp - Обработка команд с веба
 // ============================================================================
-// Проект: Heat-Chamber
-// ============================================================================
 
 #include "web_interface.h"
 #include <ArduinoJson.h>
 #include <cstdint>
 #include <cstddef>
 #include <WebSocketsServer.h>
+#include "web_server.h"
 
 static WebCallbacks userCallbacks;
 static bool hasClient = false;
@@ -31,11 +30,9 @@ void webSocketEventHandler(uint8_t num, WStype_t type, uint8_t* payload, size_t 
 
     case WStype_TEXT:
       {
-        // Убеждаемся, что строка завершается нулём
         payload[length] = '\0';
         Serial.printf("[WEB] Получена команда: %s\n", (char*)payload);
 
-        // Парсим JSON
         StaticJsonDocument<200> doc;
         DeserializationError error = deserializeJson(doc, payload);
 
@@ -44,7 +41,6 @@ void webSocketEventHandler(uint8_t num, WStype_t type, uint8_t* payload, size_t 
           break;
         }
 
-        // Извлекаем команду
         const char* command = doc["command"];
 
         if (!command) {
@@ -52,8 +48,12 @@ void webSocketEventHandler(uint8_t num, WStype_t type, uint8_t* payload, size_t 
           break;
         }
 
-        // Обрабатываем команды
-        if (strcmp(command, "setPower") == 0) {
+        // Команда запроса истории
+        if (strcmp(command, "getHistory") == 0) {
+          Serial.println("[WEB] Запрос истории");
+          sendFullHistory(num);
+        }
+        else if (strcmp(command, "setPower") == 0) {
           bool value = doc["value"];
           Serial.printf("[WEB] Команда setPower: %s\n", value ? "ON" : "OFF");
 
