@@ -1,38 +1,30 @@
 // ============================================================================
 // web_server.h - Веб-сервер и WebSocket
 // ============================================================================
-// Проект: Heat-Chamber
-// Версия ESPAsyncWebServer: 3.10.1
-// ============================================================================
 
 #ifndef WEB_SERVER_H
 #define WEB_SERVER_H
 
 #include <Arduino.h>
-#include <WiFi.h>
-#include <WebSocketsServer.h>
-#include <ESPAsyncWebServer.h>
 
-#include "config.h"
+#define WEBSOCKET_PORT 8080
+#define WEB_SERVER_PORT 80
 
-// ============================================================================
-// СТРУКТУРА ДАННЫХ ДЛЯ ОТПРАВКИ
-// ============================================================================
+// Структура для передачи данных
 struct WebData {
-  float temps[3];        // [0]-главный, [1]-второй, [2]-третий
-  float target;          // целевая температура
-  uint8_t state;         // 0-выкл, 1-вкл
-  char timeStr[6];       // ЧЧ:ММ
+  float temps[3];      // температуры датчиков
+  float target;         // уставка
+  int state;            // состояние (0/1)
+  char timeStr[6];      // время ЧЧ:ММ
+  float power;          // мощность в процентах (ДОБАВИТЬ)
+  uint32_t duty;        // значение ШИМ (ДОБАВИТЬ)
 };
 
-// ============================================================================
-// ФУНКЦИИ
-// ============================================================================
-void initWebServer();           // Запуск HTTP-сервера
-void initWebSocket();           // Запуск WebSocket
-void initMDNS();                // Запуск mDNS
-void broadcastData(const WebData& data);  // Отправка данных
-bool hasWebClients();           // Проверка клиентов
-void taskWebServer(void* pvParameters);   // Задача FreeRTOS
+void initWebServer();
+void initWebSocket();
+void initMDNS();
+void broadcastData(const WebData& data);
+bool hasWebClients();
+void taskWebServer(void* pvParameters);
 
-#endif // WEB_SERVER_H
+#endif

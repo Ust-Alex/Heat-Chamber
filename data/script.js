@@ -20,7 +20,7 @@ const CONFIG = {
     },
     
     // Периоды обновления (мс)
-    UPDATE_INTERVAL: 3000,  // 3 секунды, синхронизировано с дисплеем
+    UPDATE_INTERVAL: 1000,  // 1 секунда (реальный интервал с ESP)
     
     // Настройки реконнекта
     RECONNECT: {
@@ -47,7 +47,7 @@ const state = {
     // Датчики (3 штуки)
     sensors: [0, 0, 0],     // sensor0, sensor1, sensor2
     
-    // Мощность (пока заглушка, потом добавим)
+    // Мощность
     powerValue: 0,
     duty: 0,
     
@@ -68,7 +68,12 @@ const state = {
 };
 
 // ============================================
-// 3. DOM ЭЛЕМЕНТЫ
+// 3. ГЛОБАЛЬНЫЕ ФЛАГИ
+// ============================================
+let isEditingSetpoint = false;  // Флаг редактирования поля уставки
+
+// ============================================
+// 4. DOM ЭЛЕМЕНТЫ
 // ============================================
 const dom = {
     // Верхняя панель
@@ -95,7 +100,7 @@ const dom = {
 };
 
 // ============================================
-// 4. ИНИЦИАЛИЗАЦИЯ ГРАФИКА
+// 5. ИНИЦИАЛИЗАЦИЯ ГРАФИКА
 // ============================================
 function initChart() {
     const ctx = document.getElementById('tempChart').getContext('2d');
@@ -172,13 +177,12 @@ function initChart() {
 }
 
 // ============================================
-// 5. ОБНОВЛЕНИЕ ГРАФИКА
+// 6. ОБНОВЛЕНИЕ ГРАФИКА
 // ============================================
 function updateChart() {
     if (!state.chart) return;
     
     // Сколько точек показываем (переводим минуты в точки)
-    // 3 секунды на точку = 20 точек в минуту
     const pointsPerMinute = Math.floor(60000 / CONFIG.UPDATE_INTERVAL);
     const desiredPoints = state.currentRange * pointsPerMinute;
     const availablePoints = Math.min(state.buffer.count, desiredPoints);
@@ -218,7 +222,7 @@ function updateChart() {
 }
 
 // ============================================
-// 6. ОБНОВЛЕНИЕ ИНТЕРФЕЙСА
+// 7. ОБНОВЛЕНИЕ ИНТЕРФЕЙСА
 // ============================================
 function updateUI() {
     // Датчики
@@ -226,9 +230,13 @@ function updateUI() {
     if (dom.sensor2) dom.sensor2.textContent = state.sensors[1].toFixed(1);  // sensor1
     if (dom.sensor3) dom.sensor3.textContent = state.sensors[2].toFixed(1);  // sensor2
     
-    // Уставка
-    if (dom.topSetpoint) dom.topSetpoint.textContent = state.targetTemp.toFixed(1) + '°C';
-    if (dom.setpointInput) dom.setpointInput.value = state.targetTemp.toFixed(1);
+    // Уставка (целые числа)
+    if (dom.topSetpoint) dom.topSetpoint.textContent = Math.round(state.targetTemp) + '°C';
+    
+    // Обновляем поле ввода ТОЛЬКО если пользователь НЕ редактирует
+    if (dom.setpointInput && !isEditingSetpoint) {
+        dom.setpointInput.value = Math.round(state.targetTemp);
+    }
     
     // Время (из ESP)
     if (dom.topTime) dom.topTime.textContent = state.currentTime;
@@ -240,7 +248,7 @@ function updateUI() {
         dom.btnPower.className = 'power-btn' + (state.powerState ? '' : ' off');
     }
     
-    // Мощность (пока заглушка)
+    // Мощность
     if (dom.powerValue) {
         dom.powerValue.textContent = `${state.powerValue.toFixed(1)}% (${state.duty})`;
     }
@@ -251,7 +259,7 @@ function updateUI() {
 }
 
 // ============================================
-// 7. ОБНОВЛЕНИЕ WiFi СТАТУСА
+// 8. ОБНОВЛЕНИЕ WiFi СТАТУСА
 // ============================================
 function updateWiFiStatus(online) {
     const dotClass = online ? 'online' : 'offline-pulse';
@@ -264,10 +272,21 @@ function updateWiFiStatus(online) {
 }
 
 // ============================================
-// 8. ОБРАБОТКА ВХОДЯЩИХ ДАННЫХ
+// 9. ОБРАБОТКА ВХОДЯЩИХ ДАННЫХ
 // ============================================
 function processData(data) {
     console.log('Получены данные:', data);  // Отладка
+    
+    // ВРЕМЕННО: считаем реальный интервал
+    if (!window.lastDataTime) {
+        window.lastDataTime = Date.now();
+    } else {
+        const now = Date.now();
+        const diff = now - window.lastDataTime;
+        console.log('Реальный интервал:', diff, 'мс');
+        window.lastDataTime = now;
+    }
+    // ---------------------------------
     
     // Сохраняем состояние (соответствует формату ESP32)
     state.powerState = data.state === 1;      // state: 1=ON, 0=OFF
@@ -281,12 +300,15 @@ function processData(data) {
         data.sensor2 || 0
     ];
     
-    // Мощность (пока нет в данных, оставляем заглушку)
-    // Когда появится - будет data.power и data.duty
+    // Мощность и duty
+    if (data.power !== undefined) {
+        state.powerValue = data.power;
+        state.duty = data.duty;
+    }
     
     // Добавляем точку в буфер графика
-    const now = new Date();
-    const timeLabel = `${now.getHours().toString().padStart(2,'0')}:${now.getMinutes().toString().padStart(2,'0')}`;
+    const nowDate = new Date();
+    const timeLabel = `${nowDate.getHours().toString().padStart(2,'0')}:${nowDate.getMinutes().toString().padStart(2,'0')}`;
     
     const idx = state.buffer.index;
     state.buffer.time[idx] = timeLabel;
@@ -304,7 +326,7 @@ function processData(data) {
 }
 
 // ============================================
-// 9. WEBSOCKET
+// 10. WEBSOCKET
 // ============================================
 function connectWebSocket() {
     if (state.socket) {
@@ -353,7 +375,7 @@ function scheduleReconnect() {
 }
 
 // ============================================
-// 10. ОТПРАВКА КОМАНД
+// 11. ОТПРАВКА КОМАНД
 // ============================================
 function sendCommand(command, value) {
     if (!state.socket || state.socket.readyState !== WebSocket.OPEN) return;
@@ -370,7 +392,7 @@ function sendCommand(command, value) {
 }
 
 // ============================================
-// 11. УПРАВЛЕНИЕ
+// 12. УПРАВЛЕНИЕ
 // ============================================
 function setupControls() {
     // Кнопка питания
@@ -380,17 +402,66 @@ function setupControls() {
         updateUI();
     });
     
-    // Изменение уставки
-    dom.setpointInput.addEventListener('change', function() {
-        const val = parseFloat(this.value);
-        if (!isNaN(val) && val >= 40 && val <= 70) {
-            state.targetTemp = val;
-            sendCommand('setTarget', val);
-            updateUI();
-        } else {
-            this.value = state.targetTemp.toFixed(1);
+    // =========================================================================
+    // ОБРАБОТЧИК УСТАВКИ (С ЗАЩИТОЙ ОТ ПЕРЕЗАПИСИ)
+    // =========================================================================
+
+    // 1. Начало редактирования
+    dom.setpointInput.addEventListener('focus', function() {
+        isEditingSetpoint = true;
+    });
+
+    // 2. Разрешаем только цифры и управляющие клавиши
+    dom.setpointInput.addEventListener('keydown', function(e) {
+        // Разрешаем управляющие клавиши
+        if (e.key === 'Backspace' || e.key === 'Delete' || e.key === 'Tab' || 
+            e.key === 'Escape' || e.key === 'Enter' || e.key.startsWith('Arrow')) {
+            return;
+        }
+        
+        // Запрещаем всё, кроме цифр
+        if (!/^[0-9]$/.test(e.key)) {
+            e.preventDefault();
         }
     });
+
+    // 3. Обработка Enter
+    dom.setpointInput.addEventListener('keypress', function(e) {
+        if (e.key === 'Enter') {
+            this.blur();
+        }
+    });
+
+    // 4. Завершение редактирования
+    dom.setpointInput.addEventListener('blur', function() {
+        const val = parseInt(this.value);
+        const currentVal = Math.round(state.targetTemp);
+        
+        // Если поле пустое или не число — просто показываем текущее
+        if (this.value.trim() === '' || isNaN(val)) {
+            this.value = currentVal;
+            isEditingSetpoint = false;
+            return;
+        }
+        
+        // Проверяем диапазон
+        if (val >= 30 && val <= 70) {
+            // Если значение изменилось — отправляем на сервер
+            if (val !== currentVal) {
+                state.targetTemp = val;
+                sendCommand('setTarget', val);
+                // НЕ вызываем updateUI() здесь — подождём данные с сервера
+            } else {
+                // Значение не изменилось — просто показываем текущее
+                this.value = currentVal;
+            }
+        } else {
+            // Если вне диапазона — возвращаем старое
+            this.value = currentVal;
+        }
+        isEditingSetpoint = false;
+    });
+    // =========================================================================
     
     // Кнопки масштаба графика
     document.querySelectorAll('.scale-btn').forEach(btn => {
@@ -411,7 +482,7 @@ function setupControls() {
 }
 
 // ============================================
-// 12. ЗАПУСК
+// 13. ЗАПУСК
 // ============================================
 window.addEventListener('load', () => {
     initChart();

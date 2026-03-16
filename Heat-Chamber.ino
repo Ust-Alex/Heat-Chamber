@@ -55,6 +55,9 @@ unsigned long lastWebSend = 0;
 TaskHandle_t buttonsTaskHandle;
 TaskHandle_t webTaskHandle;
 
+float currentPower = 0.0;
+uint32_t currentDuty = 0;
+
 // ============================================================================
 // КОЛБЭКИ ДЛЯ WEB
 // ============================================================================

@@ -23,7 +23,7 @@
     <div class="window window-header" id="windowHeader">
         <div class="top-bar">
             <div class="top-left">Термический реформинг</div>
-            <div class="top-center" id="topSetpoint">45.0°C</div>
+            <div class="top-center" id="topSetpoint">30.0°C</div>
             <div class="top-right">
                 <span class="top-time" id="topTime">00:00</span>
                 <span class="wifi-dot" id="wifiDot"></span>
@@ -47,8 +47,8 @@
             
             <!-- Установка температуры -->
             <div class="setpoint-block">
-                <div class="setpoint-label">Уставка</div>
-                <input type="number" id="setpointInput" value="45.0" step="0.5" min="40.0" max="70.0">
+                <div class="setpoint-label">T°C</div>
+                <input type="number" id="setpointInput" value="30.0" step="1.0" min="30.0" max="70.0">
             </div>
             
             <!-- Мощность нагрева -->
@@ -102,7 +102,7 @@
         <div class="modal-content">
             <span class="close">&times;</span>
             <h3>Установка температуры</h3>
-            <input type="number" id="modalTarget" step="0.5" min="40" max="70" value="45.0">
+            <input type="number" id="modalTarget" step="1.0" min="30" max="70" value="30.0">
             <button id="modalSubmit">Применить</button>
         </div>
     </div>

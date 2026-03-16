@@ -11,6 +11,9 @@
 #include "pwm.h"
 #include <driver/ledc.h>
 
+extern float currentPower;
+extern uint32_t currentDuty;
+
 static bool pwm_initialized = false;
 static portMUX_TYPE pwm_mux = portMUX_INITIALIZER_UNLOCKED;
 
@@ -22,18 +25,18 @@ void setupPWM() {
     Serial.println(F("[PWM] Already initialized, skipping"));
     return;
   }
-  
+
   Serial.println(F("[PWM] Initializing..."));
-  
+
   // Критическая секция для атомарной настройки
   taskENTER_CRITICAL(&pwm_mux);
-  
+
   // 1. Настройка таймера ШИМ
   ledc_timer_config_t timer_conf = {
-    .speed_mode = LEDC_HIGH_SPEED_MODE,      // HIGH_SPEED надёжнее
-    .duty_resolution = LEDC_TIMER_13_BIT,    // 0-8191
+    .speed_mode = LEDC_HIGH_SPEED_MODE,    // HIGH_SPEED надёжнее
+    .duty_resolution = LEDC_TIMER_13_BIT,  // 0-8191
     .timer_num = LEDC_TIMER_0,
-    .freq_hz = 5000,                          // 5 кГц
+    .freq_hz = 5000,  // 5 кГц
     .clk_cfg = LEDC_AUTO_CLK
   };
   ledc_timer_config(&timer_conf);
@@ -49,12 +52,12 @@ void setupPWM() {
     .hpoint = 0
   };
   ledc_channel_config(&channel_conf);
-  
+
   taskEXIT_CRITICAL(&pwm_mux);
-  
+
   // Небольшая задержка для стабилизации
   delay(10);
-  
+
   pwm_initialized = true;
   Serial.println(F("[PWM] Initialized OK"));
 }
@@ -67,7 +70,7 @@ void setHeaterPower(float power) {
     Serial.println(F("[PWM] ERROR: Not initialized! Call setupPWM() first."));
     return;
   }
-  
+
   // Защита от дурака: 0-100%
   power = constrain(power, 0.0, 100.0);
 
@@ -79,13 +82,17 @@ void setHeaterPower(float power) {
   ledc_set_duty(LEDC_HIGH_SPEED_MODE, LEDC_CHANNEL_0, duty);
   ledc_update_duty(LEDC_HIGH_SPEED_MODE, LEDC_CHANNEL_0);
   taskEXIT_CRITICAL(&pwm_mux);
-  
+
   // Отладка при изменении мощности
   static float lastPower = -1.0;
   if (abs(power - lastPower) > 0.1) {
     Serial.printf("[PWM] Power: %.1f%% (duty: %u)\n", power, duty);
     lastPower = power;
   }
+
+  // Сохраняем текущие значения для веба
+  currentPower = power;
+  currentDuty = duty;
 }
 
 void heaterOff() {

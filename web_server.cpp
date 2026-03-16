@@ -13,6 +13,7 @@
 
 #include "web_server.h"
 #include "web_interface.h"
+#include "config.h"  // для MAX_SENSORS
 
 // ============================================================================
 // ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ
@@ -22,51 +23,64 @@ AsyncWebServer server(WEB_SERVER_PORT);
 bool clientConnected = false;
 
 extern void webSocketEventHandler(uint8_t num, WStype_t type, uint8_t* payload, size_t length);
+extern float currentPower;    // текущая мощность в %
+extern uint32_t currentDuty;  // текущее значение ШИМ
 
 // ============================================================================
 // ФОРМИРОВАНИЕ JSON
 // ============================================================================
 static void buildJSON(const WebData& data, char* buffer, size_t bufferSize) {
   snprintf(buffer, bufferSize,
-    "{"
-    "\"sensor0\":%.2f,"
-    "\"sensor1\":%.2f,"
-    "\"sensor2\":%.2f,"
-    "\"target\":%.2f,"
-    "\"state\":%d,"
-    "\"time\":\"%s\""
-    "}",
-    data.temps[0], data.temps[1], data.temps[2],
-    data.target, data.state, data.timeStr
-  );
-  
-  #if DEBUG_SERIAL
-  Serial.print(F("[WEB] JSON: ")); Serial.println(buffer);
-  #endif
+           "{"
+           "\"sensor0\":%.2f,"
+           "\"sensor1\":%.2f,"
+           "\"sensor2\":%.2f,"
+           "\"target\":%.2f,"
+           "\"state\":%d,"
+           "\"time\":\"%s\","
+           "\"power\":%.1f,"
+           "\"duty\":%u"
+           "}",
+           data.temps[0], data.temps[1], data.temps[2],
+           data.target, data.state, data.timeStr,
+           data.power, data.duty);
+
+#if DEBUG_SERIAL
+  // Статическая переменная сохраняет значение между вызовами
+  static uint32_t lastDebugTime = 0;
+  uint32_t now = millis();
+
+  // Выводим не чаще чем раз в 10000 мс (10 секунд)
+  if (now - lastDebugTime >= 10000) {
+    Serial.print(F("[WEB] JSON: "));
+    Serial.println(buffer);
+    lastDebugTime = now;
+  }
+#endif
 }
 
 // ============================================================================
 // ОБРАБОТЧИК WEBSOCKET
 // ============================================================================
 static void onWebSocketEvent(uint8_t num, WStype_t type, uint8_t* payload, size_t length) {
-  
+
   webSocketEventHandler(num, type, payload, length);
-  
+
   switch (type) {
     case WStype_DISCONNECTED:
       clientConnected = false;
-      #if DEBUG_SERIAL
+#if DEBUG_SERIAL
       Serial.printf("[WEB] Клиент %u отключился\n", num);
-      #endif
+#endif
       break;
-      
+
     case WStype_CONNECTED:
       clientConnected = true;
-      #if DEBUG_SERIAL
+#if DEBUG_SERIAL
       Serial.printf("[WEB] Клиент %u подключился\n", num);
-      #endif
+#endif
       break;
-      
+
     default:
       break;
   }
@@ -79,7 +93,7 @@ void initWebServer() {
   Serial.println(F("\n========================================"));
   Serial.println(F("🌐 ЗАПУСК ВЕБ-СЕРВЕРА"));
   Serial.println(F("========================================"));
-  
+
   // Монтируем LittleFS
   Serial.print(F("📁 LittleFS ... "));
   if (!LittleFS.begin()) {
@@ -88,15 +102,15 @@ void initWebServer() {
     return;
   }
   Serial.println(F("✅ OK"));
-  
+
   // Главная страница
-  server.on("/", AsyncWebRequestMethod::HTTP_GET, [](AsyncWebServerRequest* request) {
+  server.on("/", HTTP_GET, [](AsyncWebServerRequest* request) {
     request->send(LittleFS, "/index.html", "text/html");
   });
-  
+
   // Статические файлы
   server.serveStatic("/", LittleFS, "/");
-  
+
   // Запуск
   server.begin();
   Serial.println(F("✅ Сервер запущен"));
@@ -128,7 +142,7 @@ void initMDNS() {
 // ============================================================================
 void broadcastData(const WebData& data) {
   if (!clientConnected) return;
-  
+
   char buffer[128];
   buildJSON(data, buffer, sizeof(buffer));
   webSocket.broadcastTXT(buffer);
@@ -139,51 +153,54 @@ bool hasWebClients() {
 }
 
 // ============================================================================
-// ЗАДАЧА FREERTOS - ИСПРАВЛЕННАЯ ВЕРСИЯ С ВЫЗОВОМ sendWebData
+// ЗАДАЧА FREERTOS
 // ============================================================================
 void taskWebServer(void* pvParameters) {
   Serial.println(F("[TASK] WebServer задача запущена"));
-  
+
   // Доступ к глобальным переменным из .ino файла
   extern float sensorTemps[MAX_SENSORS];
   extern float targetTemp;
   extern bool systemState;
   extern unsigned long startMillis;
-  
+  extern float currentPower;
+  extern uint32_t currentDuty;
+
   uint32_t lastSend = 0;
-  
+
   // Вспомогательная функция для формирования строки времени ЧЧ:ММ
   auto getTimeString = [](unsigned long start) -> const char* {
     static char timeStr[6] = "00:00";
     if (start == 0) return "00:00";
-    
-    unsigned long elapsed = (millis() - start) / 60000; // минуты
+
+    unsigned long elapsed = (millis() - start) / 60000;  // минуты
     unsigned long hours = elapsed / 60;
     unsigned long minutes = elapsed % 60;
     snprintf(timeStr, sizeof(timeStr), "%02lu:%02lu", hours, minutes);
     return timeStr;
   };
-  
+
   while (1) {
     webSocket.loop();
-    
+
     uint32_t now = millis();
     // Отправляем данные раз в секунду, если есть клиенты
     if (now - lastSend >= 1000) {
-      if (isWebClientConnected()) { // Используем готовую функцию проверки
-        // Вызываем готовую функцию отправки с актуальными данными!
+      if (isWebClientConnected()) {
         sendWebData(
-          sensorTemps[0],      // t0
-          sensorTemps[1],      // t1
-          sensorTemps[2],      // t2
-          targetTemp,          // target
-          systemState,         // state
-          getTimeString(startMillis) // timeStr
+          sensorTemps[0],              // t0
+          sensorTemps[1],              // t1
+          sensorTemps[2],              // t2
+          targetTemp,                  // target
+          systemState,                 // state
+          getTimeString(startMillis),  // timeStr
+          currentPower,                // power
+          currentDuty                  // duty
         );
       }
       lastSend = now;
     }
-    
+
     vTaskDelay(pdMS_TO_TICKS(10));
   }
 }
