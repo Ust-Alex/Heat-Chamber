@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Термический реформинг</title>
     
-    <!-- СТИЛИ ПОДКЛЮЧАЕМ В HEAD (это правильно) -->
+    <!-- СТИЛИ В HEAD -->
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -55,14 +55,14 @@
         </div>
     </div>
 
-    <!-- ГРАФИК -->
+    <!-- ГРАФИК С НОВЫМИ КНОПКАМИ -->
     <div class="window window-graph" id="windowGraph">
         <div class="graph-toolbar">
             <button class="scale-btn" data-range="10">10м</button>
             <button class="scale-btn active" data-range="30">30м</button>
-            <button class="scale-btn" data-range="60">1ч</button>
-            <button class="scale-btn" data-range="180">3ч</button>
-            <button class="scale-btn" data-range="360">6ч</button>
+            <button class="scale-btn" data-range="45">45м</button>
+            <button class="scale-btn" data-range="half">1/2</button>
+            <button class="scale-btn" data-range="quarter">1/4</button>
         </div>
         <canvas id="tempChart"></canvas>
     </div>
@@ -86,14 +86,11 @@
         </div>
     </div>
 
-    <!-- ============================================ -->
-    <!-- СКРИПТЫ ПОДКЛЮЧАЕМ В САМОМ КОНЦЕ (ПОСЛЕ DOM) -->
-    <!-- ============================================ -->
+    <!-- СКРИПТЫ В КОНЦЕ -->
     <script src="chart.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
     
-    <!-- Модули приложения (порядок важен!) -->
     <script src="js/config.js"></script>
     <script src="js/state.js"></script>
     <script src="js/chart.js"></script>

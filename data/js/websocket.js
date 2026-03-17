@@ -76,7 +76,6 @@ function sendCommand(command, value) {
 function processData(data) {
     state.lastDataTime = Date.now();
     
-    // История
     if (data.history && Array.isArray(data.history)) {
         console.log(`Загрузка истории: ${data.history.length} точек`);
         
@@ -107,7 +106,6 @@ function processData(data) {
         return;
     }
     
-    // Обычное обновление
     state.powerState = data.state === 1;
     state.targetTemp = data.target || 45.0;
     state.currentTime = data.time || '00:00';

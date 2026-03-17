@@ -6,10 +6,8 @@ window.addEventListener('load', () => {
     setupControls();
     connectWebSocket();
     
-    // Проверка таймаута данных
     setInterval(() => checkDataTimeout(), 5000);
     
-    // Обновление браузерного времени (если NTP не работает)
     setInterval(() => {
         if (dom.ntpTime && (!state.ntpTime || state.ntpTime === '00:00:00')) {
             const now = new Date();
@@ -18,7 +16,6 @@ window.addEventListener('load', () => {
         }
     }, 1000);
     
-    // Активная кнопка по умолчанию
     document.querySelectorAll('.scale-btn').forEach(btn => {
         if (btn.dataset.range === '30') btn.classList.add('active');
     });

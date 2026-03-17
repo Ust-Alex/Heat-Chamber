@@ -9,6 +9,8 @@
 #include <LittleFS.h>
 #include <ESPmDNS.h>
 #include <time.h>
+#include <cstdint>
+#include <cstddef>
 
 #include "web_server.h"
 #include "web_interface.h"
@@ -164,7 +166,7 @@ static void buildJSON(const WebData& data, char* buffer, size_t bufferSize) {
 }
 
 // ============================================================================
-// ОБРАБОТЧИК WEBSOCKET
+// ОБРАБОТЧИК WEBSOCKET (ИСПРАВЛЕННАЯ ВЕРСИЯ)
 // ============================================================================
 static void onWebSocketEvent(uint8_t num, WStype_t type, uint8_t* payload, size_t length) {
 
@@ -177,8 +179,17 @@ static void onWebSocketEvent(uint8_t num, WStype_t type, uint8_t* payload, size_
       break;
 
     case WStype_CONNECTED:
+      // Защита от множественных подключений
+      if (clientConnected && num != 0) {
+        if (DEBUG_WEB) Serial.printf("[WEB] Отключаем старого клиента (был клиент 0, новый %u)\n", num);
+        webSocket.disconnect(0);
+        vTaskDelay(pdMS_TO_TICKS(10));
+      }
+      
       clientConnected = true;
       if (DEBUG_WEB) Serial.printf("[WEB] Клиент %u подключился\n", num);
+      
+      vTaskDelay(pdMS_TO_TICKS(50));
       sendFullHistory(num);
       break;
 
