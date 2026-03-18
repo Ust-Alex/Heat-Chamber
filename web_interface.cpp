@@ -71,6 +71,11 @@ void webSocketEventHandler(uint8_t num, WStype_t type, uint8_t* payload, size_t 
           } else {
             Serial.println("[WEB] Ошибка: onSetTarget не установлен");
           }
+        } else if (strcmp(command, "ping") == 0) {
+          // Отвечаем pong для поддержания связи
+          // webSocket.sendTXT(num, "{\"command\":\"pong\"}");
+          // По желанию можно раскомментировать для отладки:
+          // Serial.println("[WEB] Ping -> Pong");
         } else {
           Serial.printf("[WEB] Неизвестная команда: %s\n", command);
         }

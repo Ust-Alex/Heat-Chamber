@@ -28,7 +28,8 @@ DallasTemperature sensors(&oneWire);
 GButton btnUp(BTN_UP_PIN);
 GButton btnDown(BTN_DOWN_PIN);
 GButton btnPower(BTN_POWER_PIN);
-uPID PIDregulator(D_INPUT | I_SATURATE | I_RESET, PID_INTERVAL);  // Добавлен I_RESET
+uPID PIDregulator(D_INPUT | I_SATURATE, PID_INTERVAL);
+// uPID PIDregulator(D_INPUT | I_SATURATE | I_RESET, PID_INTERVAL);  // Добавлен I_RESET
 
 // ============================================================================
 // ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ

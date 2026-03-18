@@ -132,16 +132,21 @@ void sendFullHistory(uint8_t clientNum) {
 }
 
 // ============================================================================
-// ФОРМИРОВАНИЕ JSON
+// ФОРМИРОВАНИЕ JSON (С ЗАЩИТОЙ ОТ NaN)
 // ============================================================================
 static void buildJSON(const WebData& data, char* buffer, size_t bufferSize) {
   String ntpTime = getCurrentTimeString();
   
+  // Преобразуем каждый датчик: если NaN — пишем null, иначе число с двумя знаками
+  String sensor0Str = isnan(data.temps[0]) ? "null" : String(data.temps[0], 2);
+  String sensor1Str = isnan(data.temps[1]) ? "null" : String(data.temps[1], 2);
+  String sensor2Str = isnan(data.temps[2]) ? "null" : String(data.temps[2], 2);
+  
   snprintf(buffer, bufferSize,
            "{"
-           "\"sensor0\":%.2f,"
-           "\"sensor1\":%.2f,"
-           "\"sensor2\":%.2f,"
+           "\"sensor0\":%s,"
+           "\"sensor1\":%s,"
+           "\"sensor2\":%s,"
            "\"target\":%.2f,"
            "\"state\":%d,"
            "\"time\":\"%s\","
@@ -149,7 +154,9 @@ static void buildJSON(const WebData& data, char* buffer, size_t bufferSize) {
            "\"power\":%.1f,"
            "\"duty\":%u"
            "}",
-           data.temps[0], data.temps[1], data.temps[2],
+           sensor0Str.c_str(), 
+           sensor1Str.c_str(), 
+           sensor2Str.c_str(),
            data.target, data.state, data.timeStr,
            ntpTime.c_str(),
            data.power, data.duty);
