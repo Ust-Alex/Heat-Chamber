@@ -130,6 +130,10 @@ void taskHeaterControl(void* pvParameters) {
       lastPID = now;
       
       if (systemState && !isnan(sensorTemps[0]) && sensorTemps[0] > 0) {
+        // ========== ВАЖНО: синхронизируем уставку перед вычислением ==========
+        PIDregulator.setpoint = targetTemp;
+        // ======================================================================
+        
         float pidOut = PIDregulator.compute(sensorTemps[0]);
         float power = (pidOut / 4096.0) * 100.0;
         setHeaterPower(power);

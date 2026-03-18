@@ -28,7 +28,7 @@ DallasTemperature sensors(&oneWire);
 GButton btnUp(BTN_UP_PIN);
 GButton btnDown(BTN_DOWN_PIN);
 GButton btnPower(BTN_POWER_PIN);
-uPID PIDregulator(D_INPUT | I_SATURATE, PID_INTERVAL);
+uPID PIDregulator(D_INPUT | I_SATURATE | I_RESET, PID_INTERVAL);  // Добавлен I_RESET
 
 // ============================================================================
 // ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ
@@ -60,7 +60,7 @@ uint32_t currentDuty = 0;
 // ============================================================================
 void onSetTarget(float value) {
   targetTemp = constrain(value, 0, MAX_TEMP);
-  PIDregulator.setpoint = targetTemp;
+  PIDregulator.setpoint = targetTemp;  // ← ВАЖНО: синхронизация
   Serial.printf("[WEB] Уставка: %.1f\n", targetTemp);
 }
 
