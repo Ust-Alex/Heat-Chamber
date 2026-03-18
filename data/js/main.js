@@ -17,7 +17,7 @@ window.addEventListener('load', () => {
     }, 1000);
     
     document.querySelectorAll('.scale-btn').forEach(btn => {
-        if (btn.dataset.range === '30') btn.classList.add('active');
+        if (btn.dataset.range === '45') btn.classList.add('active');
     });
     
     updateUI();

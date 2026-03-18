@@ -49,22 +49,50 @@ function initChart() {
 function updateChart() {
     if (!state.chart) return;
     
-    // Адаптивные метки в зависимости от масштаба
-    if (state.currentRange <= 30) {
-        state.chart.options.scales.x.ticks.maxTicksLimit = 10;
-    } else if (state.currentRange <= 60) {
-        state.chart.options.scales.x.ticks.maxTicksLimit = 8;
+    const pointsPerMinute = Math.floor(60000 / CONFIG.UPDATE_INTERVAL);
+    let desiredPoints;
+    let availablePoints;
+    
+    // --- ОПРЕДЕЛЯЕМ РЕЖИМ ОТОБРАЖЕНИЯ ---
+    if (state.currentRange === 'half') {
+        // Для 1/2 показываем ПОЛОВИНУ буфера (1350 точек)
+        // desiredPoints = Math.floor(CONFIG.MAX_POINTS / 2);
+        desiredPoints = Math.floor(CONFIG.MAX_POINTS * 2);
+		
+		
+		
+		
+		availablePoints = Math.min(state.buffer.count, desiredPoints);
+        state.chart.options.scales.x.ticks.maxTicksLimit = 12;
+        
+    } else if (state.currentRange === 'quarter') {
+        // Для 1/4 показываем ЧЕТВЕРТЬ буфера (675 точек)
+        // desiredPoints = Math.floor(CONFIG.MAX_POINTS / 4);
+        desiredPoints = Math.floor(CONFIG.MAX_POINTS * 4);
+		
+		
+		
+		availablePoints = Math.min(state.buffer.count, desiredPoints);
+        state.chart.options.scales.x.ticks.maxTicksLimit = 16;
+        
     } else {
-        state.chart.options.scales.x.ticks.maxTicksLimit = 6;
+        // Для обычных режимов (10, 30, 45) - обрезаем по времени
+        desiredPoints = state.currentRange * pointsPerMinute;
+        availablePoints = Math.min(state.buffer.count, desiredPoints);
+        
+        // Настройка меток для обычных режимов
+        if (state.currentRange <= 30) {
+            state.chart.options.scales.x.ticks.maxTicksLimit = 10;
+        } else {
+            state.chart.options.scales.x.ticks.maxTicksLimit = 8;
+        }
     }
     
-    const pointsPerMinute = Math.floor(60000 / CONFIG.UPDATE_INTERVAL);
-    const desiredPoints = state.currentRange * pointsPerMinute;
-    const availablePoints = Math.min(state.buffer.count, desiredPoints);
-    
+    // Подготавливаем массивы нужной длины
     const labels = new Array(desiredPoints).fill('');
     const datasets = [ [], [], [], [] ];
     
+    // Заполняем данными (всегда справа налево)
     for (let i = 0; i < availablePoints; i++) {
         const bufferIdx = (state.buffer.index - availablePoints + i + CONFIG.MAX_POINTS) % CONFIG.MAX_POINTS;
         const chartIdx = desiredPoints - availablePoints + i;
@@ -76,6 +104,7 @@ function updateChart() {
         datasets[3][chartIdx] = state.buffer.target[bufferIdx];
     }
     
+    // Применяем к графику
     state.chart.data.labels = labels;
     state.chart.data.datasets.forEach((ds, i) => {
         ds.data = datasets[i];
