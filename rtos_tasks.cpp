@@ -122,39 +122,125 @@ void taskHeaterControl(void* pvParameters) {
 #endif
   
   unsigned long lastPID = 0;
+  bool lastSystemState = false;        // Для отслеживания момента включения
+  bool forceModeActive = false;        // Флаг форсированного режима
+  bool justExitedForce = false;        // Флаг только что завершённого форсажа
   
   while(1) {
     unsigned long now = millis();
+    
+    // ===== ОТСЛЕЖИВАНИЕ ВКЛЮЧЕНИЯ НАГРЕВА =====
+    if (systemState && !lastSystemState) {
+      // Нагрев только что включили — активируем форсаж
+      forceModeActive = true;
+      justExitedForce = false;          // Сбрасываем флаг выхода
+      Serial.println(F("[HEATER] FORCE MODE ACTIVATED (100% power until near target)"));
+    }
+    lastSystemState = systemState;
     
     if (now - lastPID >= PID_INTERVAL) {
       lastPID = now;
       
       if (systemState && !isnan(sensorTemps[0]) && sensorTemps[0] > 0) {
-        // ========== ВАЖНО: синхронизируем уставку перед вычислением ==========
-        PIDregulator.setpoint = targetTemp;
-        // ======================================================================
         
-        float pidOut = PIDregulator.compute(sensorTemps[0]);
-        float power = (pidOut / 4096.0) * 100.0;
-        setHeaterPower(power);
+        // ===== РЕЖИМ ФОРСИРОВАННОГО СТАРТА =====
+        if (forceModeActive) {
+          // Проверяем, пора ли выключать форсаж (когда температура приблизится к уставке)
+          if (sensorTemps[0] < targetTemp - 5.0) {
+            // Всё ещё форсируем — подаём 100% мощности
+            setHeaterPower(100.0);
+            
+            // Отладка форсажа
+            if (DEBUG_HEATER) {
+              static unsigned long lastForceDebug = 0;
+              if (now - lastForceDebug >= 10000) {
+                lastForceDebug = now;
+                Serial.printf("[HEATER] FORCE: Current: %.2f, Target: %.1f, Power: 100%%\n", 
+                              sensorTemps[0], targetTemp);
+              }
+            }
+          } else {
+            // Достигли целевого диапазона — выключаем форсаж
+            forceModeActive = false;
+            justExitedForce = true;      // Запоминаем, что только что вышли из форсажа
+            Serial.printf("[HEATER] FORCE MODE OFF at %.2f°C, handing over to PID\n", sensorTemps[0]);
+          }
+        }
         
-        // Отладка нагрева по отдельному флагу
-        if (DEBUG_HEATER) {
-          static unsigned long lastDebug = 0;
-          if (now - lastDebug >= 30000) {
-            lastDebug = now;
-            Serial.printf("[HEATER] Target: %.1f, Current: %.2f, Power: %.1f%%\n", 
-                          targetTemp, sensorTemps[0], power);
+        // ===== ОБЫЧНЫЙ РЕЖИМ ПИД =====
+        // Этот блок выполняется, если форсаж выключен
+        if (!forceModeActive) {
+          // Синхронизируем уставку
+          PIDregulator.setpoint = targetTemp;
+          
+          // ===== ПЛАВНАЯ ПЕРЕДАЧА УПРАВЛЕНИЯ ПОСЛЕ ФОРСАЖА =====
+          if (justExitedForce) {
+            // Рассчитываем, какой интеграл нужен, чтобы ПИД продолжил с ~80% мощности
+            float error = targetTemp - sensorTemps[0];  // Ошибка сейчас (около 5°C)
+            
+            // Желаемый выход ПИД в условных единицах (хотим около 80% мощности)
+            // 80% от 4096 = 3277
+            float desiredOutput = 3277.0;
+            
+            // Формула ПИД: output = Kp * error + Ki * integral + Kd * deriv
+            // Допускаем, что deriv = 0 (температура растёт равномерно)
+            // Тогда integral = (desiredOutput - Kp * error) / Ki
+            
+            if (PIDregulator.Ki > 0) {  // Защита от деления на ноль
+              float desiredIntegral = (desiredOutput - PIDregulator.Kp * error) / PIDregulator.Ki;
+              
+              // Ограничиваем интеграл разумными пределами
+              if (desiredIntegral < 0) desiredIntegral = 0;
+              
+              // Максимальный интеграл, соответствующий 100% мощности при error=0
+              float maxIntegral = 4096.0 / PIDregulator.Ki;  // При Ki=0.08 это 51200
+              if (desiredIntegral > maxIntegral) desiredIntegral = maxIntegral;
+              
+              PIDregulator.integral = desiredIntegral;
+              
+              if (DEBUG_HEATER) {
+                Serial.printf("[HEATER] PID integral seeded to %.1f for smooth handover (error=%.1f)\n", 
+                              desiredIntegral, error);
+              }
+            }
+            justExitedForce = false;  // Сбрасываем флаг
+          }
+          
+          // Вычисляем ПИД
+          float pidOut = PIDregulator.compute(sensorTemps[0]);
+          float power = (pidOut / 4096.0) * 100.0;
+          
+          // Ограничиваем мощность (на всякий случай)
+          if (power > 100.0) power = 100.0;
+          if (power < 0.0) power = 0.0;
+          
+          setHeaterPower(power);
+          
+          // Отладка нагрева
+          if (DEBUG_HEATER) {
+            static unsigned long lastDebug = 0;
+            if (now - lastDebug >= 30000) {
+              lastDebug = now;
+              Serial.printf("[HEATER] Target: %.1f, Current: %.2f, Power: %.1f%% (PID out: %.1f)\n", 
+                            targetTemp, sensorTemps[0], power, pidOut);
+            }
           }
         }
       } else {
+        // Нагрев выключен или датчик неисправен
         heaterOff();
+        forceModeActive = false;
+        justExitedForce = false;
       }
     }
     
     vTaskDelay(pdMS_TO_TICKS(50));
   }
 }
+
+
+
+
 
 // ============================================================================
 // ФУНКЦИЯ СОЗДАНИЯ ВСЕХ ЗАДАЧ
