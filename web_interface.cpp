@@ -108,8 +108,8 @@ void sendWebData(float t0, float t1, float t2, float target, bool state,
   data.temps[2] = t2;
   data.target = target;
   data.state = state ? 1 : 0;
-  strncpy(data.timeStr, timeStr, 5);
-  data.timeStr[5] = '\0';
+  strncpy(data.timeStr, timeStr, 8);
+  data.timeStr[8] = '\0';
   data.power = power;
   data.duty = duty;
 

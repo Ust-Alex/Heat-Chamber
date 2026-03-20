@@ -25,7 +25,7 @@ bool initWiFi() {
   // ШАГ 2: Отключаем автоматическое подключение к предыдущим сетям
   // --------------------------------------------------------------------------
   Serial.print(F("🔄 Сброс авто-подключения ... "));
-  WiFi.setAutoReconnect(false);
+  WiFi.setAutoReconnect(true);
   WiFi.persistent(false);
   Serial.println(F("OK"));
   

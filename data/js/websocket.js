@@ -108,7 +108,7 @@ function processData(data) {
     
     state.powerState = data.state === 1;
     state.targetTemp = data.target || 45.0;
-    state.currentTime = data.time || '00:00';
+    state.currentTime = data.time || '00:00:00';
     state.ntpTime = data.ntpTime || '00:00:00';
     
     state.sensors = [

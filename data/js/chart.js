@@ -21,7 +21,7 @@ function initChart() {
             maintainAspectRatio: false,
             animation: { duration: 0 },
             scales: {
-                y: { min: 20, max: 70, grid: { color: '#333' }, ticks: { color: '#ccc', stepSize: 5 } },
+                y: { min: 20, max: 80, grid: { color: '#333' }, ticks: { color: '#ccc', stepSize: 5 } },
                 x: { 
                     ticks: { 
                         color: '#ccc',

@@ -19,6 +19,7 @@
 #include "web_server.h"
 #include "web_interface.h"
 #include "rtos_tasks.h"
+#include "settings.h"
 
 // ============================================================================
 // ОБЪЕКТЫ
@@ -30,7 +31,6 @@ GButton btnUp(BTN_UP_PIN);
 GButton btnDown(BTN_DOWN_PIN);
 GButton btnPower(BTN_POWER_PIN);
 uPID PIDregulator(D_INPUT | I_SATURATE, PID_INTERVAL);
-// uPID PIDregulator(D_INPUT | I_SATURATE | I_RESET, PID_INTERVAL);  // Добавлен I_RESET
 
 // ============================================================================
 // ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ
@@ -40,7 +40,7 @@ bool systemState = false;
 DeviceAddress sensorAddresses[MAX_SENSORS];
 uint8_t sensorCount = 0;
 float sensorTemps[MAX_SENSORS] = { 0 };
-unsigned long startMillis = 0;
+unsigned long startMillis = 0;  // Для совместимости (не используется для таймера)
 
 int targetHistory[GRAPH_WIDTH] = { 0 };
 float sensorHistory[MAX_SENSORS][GRAPH_WIDTH] = { 0 };
@@ -58,17 +58,24 @@ float currentPower = 0.0;
 uint32_t currentDuty = 0;
 
 // ============================================================================
-// КОЛБЭКИ ДЛЯ WEB
+// ОБЪЯВЛЕНИЕ ВНЕШНИХ ПЕРЕМЕННЫХ (из rtos_tasks.cpp)
+// ============================================================================
+extern unsigned long heaterSeconds;  // общее время нагрева
+
+// ============================================================================
+// КОЛБЭКИ ДЛЯ WEB (С СОХРАНЕНИЕМ НАСТРОЕК)
 // ============================================================================
 void onSetTarget(float value) {
   targetTemp = constrain(value, 0, MAX_TEMP);
-  PIDregulator.setpoint = targetTemp;  // ← ВАЖНО: синхронизация
+  PIDregulator.setpoint = targetTemp;
+  saveSettings(targetTemp, systemState);
   Serial.printf("[WEB] Уставка: %.1f\n", targetTemp);
 }
 
 void onSetPower(bool state) {
   systemState = state;
-  if (systemState) startMillis = millis();
+  // НЕ трогаем heaterSeconds здесь — он обновляется в taskHeaterControl
+  saveSettings(targetTemp, systemState);
   Serial.printf("[WEB] Питание: %s\n", state ? "ON" : "OFF");
 }
 
@@ -141,7 +148,7 @@ void setup() {
   initGraphBuffers(targetHistory, sensorHistory, targetTemp, MAX_SENSORS);
   Serial.println(F("OK"));
 
-  // [7] WiFi (ТЕПЕРЬ СНАЧАЛА)
+  // [7] WiFi
   Serial.print(F("[7/15] WiFi init ... "));
   if (initWiFi()) {
     Serial.println(F("CONNECTED"));
@@ -149,7 +156,16 @@ void setup() {
     Serial.println(F("FAILED (continue without WiFi)"));
   }
 
-  // [8] NTP (ТЕПЕРЬ ПОСЛЕ WiFi)
+  // [7.5] ЗАГРУЗКА НАСТРОЕК ИЗ ПАМЯТИ
+  Serial.print(F("[7.5/15] Loading settings ... "));
+  initSettings(targetTemp, systemState);  // Здесь загружается и heaterSeconds
+
+  // startMillis больше не используется для таймера, оставляем как есть
+  startMillis = millis();  // Для других целей, если нужен uptime
+
+  Serial.println(F("OK"));
+
+  // [8] NTP
   Serial.print(F("[8/15] NTP init ... "));
   initNTP();
 
@@ -177,8 +193,6 @@ void setup() {
   callbacks.onReset = onReset;
   initWebInterface(callbacks);
   Serial.println(F("OK"));
-
-  startMillis = millis();
 
   // [13] ЗАДАЧИ FREERTOS
   createAllTasks(&btnUp, &btnDown, &btnPower, &targetTemp, &systemState, &startMillis);

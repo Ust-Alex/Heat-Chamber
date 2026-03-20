@@ -6,6 +6,7 @@
 #include "web_server.h"
 #include "serial_commands.h"
 #include "config.h"
+#include "settings.h"  // добавлено для saveHeaterTime()
 
 // ============================================================================
 // ВНЕШНИЕ ПЕРЕМЕННЫЕ
@@ -35,6 +36,11 @@ extern float currentPower;
 // ============================================================================
 extern TaskHandle_t buttonsTaskHandle;
 extern TaskHandle_t webTaskHandle;
+
+// ============================================================================
+// ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ДЛЯ ТАЙМЕРА НАГРЕВА
+// ============================================================================
+unsigned long heaterSeconds = 0;  // общее время нагрева в секундах
 
 // ============================================================================
 // ПРОТОТИП задачи для Serial
@@ -126,103 +132,129 @@ void taskHeaterControl(void* pvParameters) {
   bool forceModeActive = false;        // Флаг форсированного режима
   bool justExitedForce = false;        // Флаг только что завершённого форсажа
   
+  // ===== ПЕРИОДИЧЕСКОЕ СОХРАНЕНИЕ ВРЕМЕНИ НАГРЕВА =====
+  static unsigned long lastTimeSave = 0;
+  const unsigned long SAVE_INTERVAL = 300000;  // 5 минут в миллисекундах
+  
   while(1) {
     unsigned long now = millis();
     
     // ===== ОТСЛЕЖИВАНИЕ ВКЛЮЧЕНИЯ НАГРЕВА =====
     if (systemState && !lastSystemState) {
-      // Нагрев только что включили — активируем форсаж
-      forceModeActive = true;
-      justExitedForce = false;          // Сбрасываем флаг выхода
-      Serial.println(F("[HEATER] FORCE MODE ACTIVATED (100% power until near target)"));
+      // Нагрев только что включили — активируем форсаж (но только если температура ниже уставки)
+      if (sensorTemps[0] < targetTemp - 2.0) {  // Небольшой гистерезис
+        forceModeActive = true;
+        justExitedForce = false;
+        Serial.printf("[HEATER] FORCE MODE ACTIVATED (100%%, current: %.1f, target: %.1f)\n", 
+                      sensorTemps[0], targetTemp);
+      } else {
+        forceModeActive = false;
+        Serial.printf("[HEATER] Normal mode (current: %.1f, target: %.1f)\n", 
+                      sensorTemps[0], targetTemp);
+      }
     }
     lastSystemState = systemState;
+
+    // ===== ОБНОВЛЕНИЕ СЧЁТЧИКА ВРЕМЕНИ НАГРЕВА =====
+    static unsigned long lastHeaterSecond = 0;
+    if (systemState && millis() - lastHeaterSecond >= 1000) {
+      heaterSeconds++;
+      lastHeaterSecond = millis();
+    }
+    
+    // ===== ПЕРИОДИЧЕСКОЕ СОХРАНЕНИЕ ВРЕМЕНИ НАГРЕВА =====
+    if (millis() - lastTimeSave >= SAVE_INTERVAL) {
+      lastTimeSave = millis();
+      saveHeaterTime();  // сохраняем текущее значение heaterSeconds
+    }
     
     if (now - lastPID >= PID_INTERVAL) {
       lastPID = now;
       
       if (systemState && !isnan(sensorTemps[0]) && sensorTemps[0] > 0) {
         
+        // ===== ПРОВЕРКА: НЕ ГРЕТЬ, ЕСЛИ УЖЕ ГОРЯЧО =====
+        if (sensorTemps[0] >= targetTemp) {
+          // Достигли или превысили уставку — выключаем нагрев
+          setHeaterPower(0.0);
+          forceModeActive = false;
+          
+          if (DEBUG_HEATER) {
+            static unsigned long lastDebug = 0;
+            if (now - lastDebug >= 10000) {
+              lastDebug = now;
+              Serial.printf("[HEATER] Target reached: %.1f >= %.1f, heater OFF\n", 
+                            sensorTemps[0], targetTemp);
+            }
+          }
+        }
         // ===== РЕЖИМ ФОРСИРОВАННОГО СТАРТА =====
-        if (forceModeActive) {
-          // Проверяем, пора ли выключать форсаж (когда температура приблизится к уставке)
+        else if (forceModeActive) {
+          // Проверяем, пора ли выключать форсаж
           if (sensorTemps[0] < targetTemp - 5.0) {
-            // Всё ещё форсируем — подаём 100% мощности
+            // Всё ещё форсируем
             setHeaterPower(100.0);
             
-            // Отладка форсажа
             if (DEBUG_HEATER) {
               static unsigned long lastForceDebug = 0;
-              if (now - lastForceDebug >= 10000) {
+              if (now - lastForceDebug >= 5000) {
                 lastForceDebug = now;
-                Serial.printf("[HEATER] FORCE: Current: %.2f, Target: %.1f, Power: 100%%\n", 
+                Serial.printf("[HEATER] FORCE: %.1f -> %.1f, 100%%\n", 
                               sensorTemps[0], targetTemp);
               }
             }
           } else {
-            // Достигли целевого диапазона — выключаем форсаж
+            // Достигли диапазона — выключаем форсаж
             forceModeActive = false;
-            justExitedForce = true;      // Запоминаем, что только что вышли из форсажа
-            Serial.printf("[HEATER] FORCE MODE OFF at %.2f°C, handing over to PID\n", sensorTemps[0]);
+            justExitedForce = true;
+            Serial.printf("[HEATER] FORCE MODE OFF at %.1f°C\n", sensorTemps[0]);
           }
         }
         
         // ===== ОБЫЧНЫЙ РЕЖИМ ПИД =====
-        // Этот блок выполняется, если форсаж выключен
-        if (!forceModeActive) {
-          // Синхронизируем уставку
+        // Выполняется, если форсаж выключен И температура ниже уставки
+        if (!forceModeActive && sensorTemps[0] < targetTemp) {
+          
           PIDregulator.setpoint = targetTemp;
           
           // ===== ПЛАВНАЯ ПЕРЕДАЧА УПРАВЛЕНИЯ ПОСЛЕ ФОРСАЖА =====
           if (justExitedForce) {
-            // Рассчитываем, какой интеграл нужен, чтобы ПИД продолжил с ~80% мощности
-            float error = targetTemp - sensorTemps[0];  // Ошибка сейчас (около 5°C)
+            float error = targetTemp - sensorTemps[0];
+            float desiredOutput = 3277.0;  // 80% мощности
             
-            // Желаемый выход ПИД в условных единицах (хотим около 80% мощности)
-            // 80% от 4096 = 3277
-            float desiredOutput = 3277.0;
-            
-            // Формула ПИД: output = Kp * error + Ki * integral + Kd * deriv
-            // Допускаем, что deriv = 0 (температура растёт равномерно)
-            // Тогда integral = (desiredOutput - Kp * error) / Ki
-            
-            if (PIDregulator.Ki > 0) {  // Защита от деления на ноль
+            if (PIDregulator.Ki > 0) {
               float desiredIntegral = (desiredOutput - PIDregulator.Kp * error) / PIDregulator.Ki;
+              float maxIntegral = 4096.0 / PIDregulator.Ki;
               
-              // Ограничиваем интеграл разумными пределами
               if (desiredIntegral < 0) desiredIntegral = 0;
-              
-              // Максимальный интеграл, соответствующий 100% мощности при error=0
-              float maxIntegral = 4096.0 / PIDregulator.Ki;  // При Ki=0.08 это 51200
               if (desiredIntegral > maxIntegral) desiredIntegral = maxIntegral;
               
               PIDregulator.integral = desiredIntegral;
               
               if (DEBUG_HEATER) {
-                Serial.printf("[HEATER] PID integral seeded to %.1f for smooth handover (error=%.1f)\n", 
+                Serial.printf("[HEATER] PID seeded: int=%.1f, err=%.1f\n", 
                               desiredIntegral, error);
               }
             }
-            justExitedForce = false;  // Сбрасываем флаг
+            justExitedForce = false;
           }
           
           // Вычисляем ПИД
           float pidOut = PIDregulator.compute(sensorTemps[0]);
           float power = (pidOut / 4096.0) * 100.0;
           
-          // Ограничиваем мощность (на всякий случай)
           if (power > 100.0) power = 100.0;
           if (power < 0.0) power = 0.0;
           
           setHeaterPower(power);
           
-          // Отладка нагрева
+          // Отладка
           if (DEBUG_HEATER) {
             static unsigned long lastDebug = 0;
             if (now - lastDebug >= 30000) {
               lastDebug = now;
-              Serial.printf("[HEATER] Target: %.1f, Current: %.2f, Power: %.1f%% (PID out: %.1f)\n", 
-                            targetTemp, sensorTemps[0], power, pidOut);
+              Serial.printf("[HEATER] PID: %.1f->%.1f, P=%.1f%%\n", 
+                            sensorTemps[0], targetTemp, power);
             }
           }
         }
@@ -238,10 +270,6 @@ void taskHeaterControl(void* pvParameters) {
   }
 }
 
-
-
-
-
 // ============================================================================
 // ФУНКЦИЯ СОЗДАНИЯ ВСЕХ ЗАДАЧ
 // ============================================================================
@@ -253,13 +281,10 @@ void createAllTasks(
   bool* systemStatePtr,
   unsigned long* startMillisPtr
 ) {
-  // Эти сообщения важны при старте, оставим их всегда
   Serial.println(F("\n[RTOS] Creating all tasks..."));
 
-  // --------------------------------------------------------------------------
-  // ЗАДАЧА 1: КНОПКИ (ядро 0, приоритет 1)
-  // --------------------------------------------------------------------------
-  Serial.print(F("   Button task (core 0, prio 1, stack 4096) ... "));
+  // ЗАДАЧА 1: КНОПКИ
+  Serial.print(F("   Button task ... "));
   buttonsTaskHandle = createButtonsTask(
     btnUp, btnDown, btnPower,
     targetTempPtr, systemStatePtr, startMillisPtr,
@@ -267,75 +292,39 @@ void createAllTasks(
     [](float newTarget) { PIDregulator.setpoint = newTarget; });
   Serial.println(F("OK"));
 
-  // --------------------------------------------------------------------------
-  // ЗАДАЧА 2: ДИСПЛЕЙ (ядро 0, приоритет 2)
-  // --------------------------------------------------------------------------
-  Serial.print(F("   Display task (core 0, prio 2, stack 4096) ... "));
-  xTaskCreatePinnedToCore(
-    taskDisplay,
-    "displayTask", 
-    4096,
-    NULL, 
-    2,
-    NULL, 
-    0);
+  // ЗАДАЧА 2: ДИСПЛЕЙ
+  Serial.print(F("   Display task ... "));
+  xTaskCreatePinnedToCore(taskDisplay, "displayTask", 4096, NULL, 2, NULL, 0);
   Serial.println(F("OK"));
 
-  // --------------------------------------------------------------------------
-  // ЗАДАЧА 3: WiFi/ВЕБ (ядро 1, приоритет 3)
-  // --------------------------------------------------------------------------
-  Serial.print(F("   WiFi task (core 1, prio 3, stack 8192) ... "));
-  xTaskCreatePinnedToCore(
-    taskWebServer, 
-    "webTask", 
-    8192,
-    NULL, 
-    3,
-    &webTaskHandle, 
-    1);
+  // ЗАДАЧА 3: WiFi/ВЕБ
+  Serial.print(F("   WiFi task ... "));
+  xTaskCreatePinnedToCore(taskWebServer, "webTask", 8192, NULL, 3, &webTaskHandle, 1);
   Serial.println(F("OK"));
 
-  // --------------------------------------------------------------------------
-  // ЗАДАЧА 4: ДАТЧИКИ (ядро 1, приоритет 3)
-  // --------------------------------------------------------------------------
-  Serial.print(F("   Sensor task (core 1, prio 3, stack 4096) ... "));
-  xTaskCreatePinnedToCore(
-    taskSensors,
-    "sensorTask", 
-    4096,
-    NULL, 
-    3,
-    NULL, 
-    1);
+  // ЗАДАЧА 4: ДАТЧИКИ
+  Serial.print(F("   Sensor task ... "));
+  xTaskCreatePinnedToCore(taskSensors, "sensorTask", 4096, NULL, 3, NULL, 1);
   Serial.println(F("OK"));
 
-  // --------------------------------------------------------------------------
-  // ЗАДАЧА 5: УПРАВЛЕНИЕ НАГРЕВОМ (ядро 1, приоритет 3)
-  // --------------------------------------------------------------------------
-  Serial.print(F("   Heater task (core 1, prio 3, stack 4096) ... "));
-  xTaskCreatePinnedToCore(
-    taskHeaterControl,
-    "heaterTask", 
-    4096,
-    NULL, 
-    3,
-    NULL, 
-    1);
+  // ЗАДАЧА 5: НАГРЕВ
+  Serial.print(F("   Heater task ... "));
+  xTaskCreatePinnedToCore(taskHeaterControl, "heaterTask", 4096, NULL, 3, NULL, 1);
   Serial.println(F("OK"));
 
-  // --------------------------------------------------------------------------
-  // ЗАДАЧА 6: SERIAL (ядро 0, приоритет 1)
-  // --------------------------------------------------------------------------
-  Serial.print(F("   Serial task (core 0, prio 1, stack 4096) ... "));
-  xTaskCreatePinnedToCore(
-    taskSerialCommands,
-    "serialTask", 
-    4096,
-    NULL, 
-    1,
-    NULL, 
-    0);
+  // ЗАДАЧА 6: SERIAL
+  Serial.print(F("   Serial task ... "));
+  xTaskCreatePinnedToCore(taskSerialCommands, "serialTask", 4096, NULL, 1, NULL, 0);
   Serial.println(F("OK"));
+
+  // ЗАДАЧА 7: WiFi KEEPALIVE (если файл добавлен)
+  #ifdef WIFI_KEEPALIVE_H
+  extern TaskHandle_t wifiKeepaliveTaskHandle;
+  extern void taskWiFiKeepalive(void*);
+  Serial.print(F("   WiFi keepalive task ... "));
+  xTaskCreatePinnedToCore(taskWiFiKeepalive, "wifiKeepalive", 2048, NULL, 1, &wifiKeepaliveTaskHandle, 0);
+  Serial.println(F("OK"));
+  #endif
 
   Serial.println(F("[RTOS] All tasks created"));
 }

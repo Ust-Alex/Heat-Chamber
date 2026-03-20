@@ -10,16 +10,28 @@
 #include <Arduino.h>
 #include <functional>
 #include <WebSocketsServer.h>
-#include "web_server.h"
+// НЕ подключаем web_server.h здесь, чтобы избежать циклических зависимостей
+
+// ============================================================================
+// СТРУКТУРА ДАННЫХ ДЛЯ ВЕБА (ПОЛНОЕ ОПРЕДЕЛЕНИЕ)
+// ============================================================================
+struct WebData {
+  float temps[3];
+  float target;
+  uint8_t state;
+  char timeStr[9];        // для "ЧЧ:ММ:СС"
+  float power;
+  uint32_t duty;
+};
 
 // ============================================================================
 // СТРУКТУРА КОЛБЭКОВ
 // ============================================================================
 struct WebCallbacks {
-  std::function<void(float)> onSetTarget;             // изменение уставки
-  std::function<void(bool)> onSetPower;               // вкл/выкл
-  std::function<void(float, float, float)> onSetPID;  // коэффициенты ПИД
-  std::function<void()> onReset;                      // перезагрузка
+  std::function<void(float)> onSetTarget;
+  std::function<void(bool)> onSetPower;
+  std::function<void(float, float, float)> onSetPID;
+  std::function<void()> onReset;
 };
 
 // ============================================================================

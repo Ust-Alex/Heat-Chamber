@@ -3,15 +3,19 @@
 // ============================================================================
 
 #include "rtos_buttons.h"
+#include "settings.h"
+
+// Внешние переменные для сохранения настроек
+extern float targetTemp;
+extern bool systemState;
 
 // ============================================================================
-// ФУНКЦИЯ ЗАДАЧИ (статическая, видна только в этом файле)
+// ФУНКЦИЯ ЗАДАЧИ
 // ============================================================================
 static void buttonsTask(void* pvParameters) {
   ButtonTaskData* data = (ButtonTaskData*)pvParameters;
   
   for (;;) {
-    // Обработка состояний кнопок
     data->btnUp->tick();
     data->btnDown->tick();
     data->btnPower->tick();
@@ -20,8 +24,11 @@ static void buttonsTask(void* pvParameters) {
     if (data->btnPower->isClick()) {
       *(data->systemState) = !(*(data->systemState));
       if (*(data->systemState)) {
-        *(data->startMillis) = millis();  // сброс таймера при включении
+        *(data->startMillis) = millis();  // Включили → таймер стартует
+      } else {
+        *(data->startMillis) = 0;          // Выключили → таймер сбрасывается
       }
+      saveSettings(*(data->targetTemp), *(data->systemState));
     }
 
     // Кнопка "+"
@@ -30,6 +37,7 @@ static void buttonsTask(void* pvParameters) {
       if (data->onTargetChanged) {
         data->onTargetChanged(*(data->targetTemp));
       }
+      saveSettings(*(data->targetTemp), *(data->systemState));
     }
 
     // Кнопка "-"
@@ -38,6 +46,7 @@ static void buttonsTask(void* pvParameters) {
       if (data->onTargetChanged) {
         data->onTargetChanged(*(data->targetTemp));
       }
+      saveSettings(*(data->targetTemp), *(data->systemState));
     }
 
     vTaskDelay(pdMS_TO_TICKS(10));
@@ -57,7 +66,6 @@ TaskHandle_t createButtonsTask(
   float maxTemp,
   void (*onTargetChanged)(float)
 ) {
-  // Выделяем память под структуру с данными
   ButtonTaskData* data = new ButtonTaskData;
   
   data->btnUp = btnUp;
@@ -72,13 +80,13 @@ TaskHandle_t createButtonsTask(
   TaskHandle_t handle;
   
   xTaskCreatePinnedToCore(
-    buttonsTask,      // функция задачи
-    "buttonsTask",    // имя
-    2048,             // размер стека
-    data,             // параметры
-    1,                // приоритет
-    &handle,          // дескриптор
-    0                 // ядро 0
+    buttonsTask,
+    "buttonsTask",
+    2048,
+    data,
+    1,
+    &handle,
+    0
   );
   
   return handle;

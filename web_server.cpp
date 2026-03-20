@@ -52,7 +52,7 @@ void initNTP() {
     if (DEBUG_NTP) Serial.println(F("⚠️ WiFi не подключён, NTP отложен"));
     return;
   }
-  
+
   if (DEBUG_NTP) Serial.print(F("[NTP] Синхронизация времени... "));
   configTime(TIMEZONE_OFFSET, 0, NTP_SERVER1, NTP_SERVER2);
   if (DEBUG_NTP) Serial.println(F("запущена (фоновая)"));
@@ -65,7 +65,7 @@ void initNTP() {
 // ============================================================================
 String getCurrentTimeString() {
   static char timeStr[9] = "00:00:00";
-  
+
   if (!ntpSyncDone && isWiFiConnected() && millis() - lastNTPAttempt > 30000) {
     if (getLocalTime(&timeinfo)) {
       strftime(timeStr, sizeof(timeStr), "%H:%M:%S", &timeinfo);
@@ -77,7 +77,7 @@ String getCurrentTimeString() {
     getLocalTime(&timeinfo);
     strftime(timeStr, sizeof(timeStr), "%H:%M:%S", &timeinfo);
   }
-  
+
   return String(timeStr);
 }
 
@@ -90,14 +90,14 @@ void addHistoryPoint(float s0, float s1, float s2, float tgt) {
   p.sensor1 = s1;
   p.sensor2 = s2;
   p.target = tgt;
-  
+
   if (ntpSyncDone) {
     time_t t = time(nullptr);
     p.timestamp = t;
   } else {
     p.timestamp = millis() / 1000;
   }
-  
+
   historyIndex = (historyIndex + 1) % HISTORY_SIZE;
   if (historyCount < HISTORY_SIZE) historyCount++;
 }
@@ -107,12 +107,12 @@ void addHistoryPoint(float s0, float s1, float s2, float tgt) {
 // ============================================================================
 void sendFullHistory(uint8_t clientNum) {
   if (historyCount == 0) return;
-  
+
   DynamicJsonDocument doc(historyCount * 60 + 512);
   JsonArray history = doc.createNestedArray("history");
-  
+
   int startIdx = (historyIndex - historyCount + HISTORY_SIZE) % HISTORY_SIZE;
-  
+
   for (int i = 0; i < historyCount; i++) {
     int idx = (startIdx + i) % HISTORY_SIZE;
     JsonObject point = history.createNestedObject();
@@ -122,11 +122,11 @@ void sendFullHistory(uint8_t clientNum) {
     point["target"] = historyBuffer[idx].target;
     point["time"] = historyBuffer[idx].timestamp;
   }
-  
+
   String json;
   serializeJson(doc, json);
   webSocket.sendTXT(clientNum, json);
-  
+
   if (DEBUG_WEB) {
     Serial.printf("[HISTORY] Отправлено %d точек клиенту %u\n", historyCount, clientNum);
   }
@@ -137,12 +137,12 @@ void sendFullHistory(uint8_t clientNum) {
 // ============================================================================
 static void buildJSON(const WebData& data, char* buffer, size_t bufferSize) {
   String ntpTime = getCurrentTimeString();
-  
+
   // Преобразуем каждый датчик: если NaN — пишем null, иначе число с двумя знаками
   String sensor0Str = isnan(data.temps[0]) ? "null" : String(data.temps[0], 2);
   String sensor1Str = isnan(data.temps[1]) ? "null" : String(data.temps[1], 2);
   String sensor2Str = isnan(data.temps[2]) ? "null" : String(data.temps[2], 2);
-  
+
   snprintf(buffer, bufferSize,
            "{"
            "\"sensor0\":%s,"
@@ -155,8 +155,8 @@ static void buildJSON(const WebData& data, char* buffer, size_t bufferSize) {
            "\"power\":%.1f,"
            "\"duty\":%u"
            "}",
-           sensor0Str.c_str(), 
-           sensor1Str.c_str(), 
+           sensor0Str.c_str(),
+           sensor1Str.c_str(),
            sensor2Str.c_str(),
            data.target, data.state, data.timeStr,
            ntpTime.c_str(),
@@ -193,10 +193,10 @@ static void onWebSocketEvent(uint8_t num, WStype_t type, uint8_t* payload, size_
         webSocket.disconnect(0);
         vTaskDelay(pdMS_TO_TICKS(10));
       }
-      
+
       clientConnected = true;
       if (DEBUG_WEB) Serial.printf("[WEB] Клиент %u подключился\n", num);
-      
+
       vTaskDelay(pdMS_TO_TICKS(50));
       sendFullHistory(num);
       break;
@@ -274,19 +274,19 @@ void taskWebServer(void* pvParameters) {
   extern float sensorTemps[MAX_SENSORS];
   extern float targetTemp;
   extern bool systemState;
-  extern unsigned long startMillis;
+  extern unsigned long heaterSeconds;  // ← ИЗМЕНЕНО: используем время нагрева
   extern float currentPower;
   extern uint32_t currentDuty;
 
   uint32_t lastSend = 0;
 
-  auto getTimeString = [](unsigned long start) -> const char* {
-    static char timeStr[6] = "00:00";
-    if (start == 0) return "00:00";
-    unsigned long elapsed = (millis() - start) / 60000;
-    unsigned long hours = elapsed / 60;
-    unsigned long minutes = elapsed % 60;
-    snprintf(timeStr, sizeof(timeStr), "%02lu:%02lu", hours, minutes);
+  // Функция получает готовое количество секунд
+  auto getTimeString = [](unsigned long totalSeconds) -> const char* {
+    static char timeStr[9] = "00:00:00";
+    unsigned long hours = totalSeconds / 3600;
+    unsigned long minutes = (totalSeconds % 3600) / 60;
+    unsigned long seconds = totalSeconds % 60;
+    snprintf(timeStr, sizeof(timeStr), "%02lu:%02lu:%02lu", hours, minutes, seconds);
     return timeStr;
   };
 
@@ -296,16 +296,19 @@ void taskWebServer(void* pvParameters) {
     uint32_t now = millis();
     if (now - lastSend >= 1000) {
       if (isWebClientConnected()) {
+        
+        // Вычисляем текущее время нагрева
+        unsigned long currentHeaterTime = heaterSeconds;
+        
         sendWebData(
           sensorTemps[0],
           sensorTemps[1],
           sensorTemps[2],
           targetTemp,
           systemState,
-          getTimeString(startMillis),
+          getTimeString(currentHeaterTime),  // ← передаём время нагрева
           currentPower,
-          currentDuty
-        );
+          currentDuty);
       }
       lastSend = now;
     }
