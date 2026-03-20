@@ -222,6 +222,34 @@ body {
     font-family: monospace;
 }
 
+/* Кнопка сброса таймера */
+.timer-reset-btn {
+    width: 120px;
+    height: 36px;
+    background: #333;
+    border: 1px solid #555;
+    color: #ccc;
+    font-size: 14px;
+    font-weight: bold;
+    border-radius: 6px;
+    cursor: pointer;
+    margin: 4px 0;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.timer-reset-btn:hover {
+    background: #444;
+    color: white;
+    border-color: #666;
+}
+
+.timer-reset-btn:active {
+    transform: scale(0.98);
+}
+
 /* WiFi блок */
 .wifi-block {
     width: 120px;

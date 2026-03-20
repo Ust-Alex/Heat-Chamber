@@ -9,6 +9,8 @@
 #include <WebSocketsServer.h>
 #include "web_server.h"
 
+extern unsigned long heaterSeconds;
+
 static WebCallbacks userCallbacks;
 static bool hasClient = false;
 extern WebSocketsServer webSocket;
@@ -71,11 +73,11 @@ void webSocketEventHandler(uint8_t num, WStype_t type, uint8_t* payload, size_t 
           } else {
             Serial.println("[WEB] Ошибка: onSetTarget не установлен");
           }
+        } else if (strcmp(command, "resetTimer") == 0) {
+          heaterSeconds = 0;
+          Serial.println(F("[WEB] Таймер нагрева сброшен"));
         } else if (strcmp(command, "ping") == 0) {
-          // Отвечаем pong для поддержания связи
-          // webSocket.sendTXT(num, "{\"command\":\"pong\"}");
-          // По желанию можно раскомментировать для отладки:
-          // Serial.println("[WEB] Ping -> Pong");
+          // Игнорируем ping
         } else {
           Serial.printf("[WEB] Неизвестная команда: %s\n", command);
         }

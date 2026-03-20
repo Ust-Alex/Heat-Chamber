@@ -2,13 +2,13 @@
 #include "config.h"
 #include "pwm.h"
 #include "settings.h"
-#include <uPID.h>  // ← ДОБАВЛЕНО
+#include <uPID.h>
 
 // Внешние переменные из проекта
 extern float sensorTemps[MAX_SENSORS];
 extern float targetTemp;
 extern bool systemState;
-extern uPID PIDregulator;  // ← теперь компилятор знает, что такое uPID
+extern uPID PIDregulator;
 
 // Определение глобальной переменной (ТОЛЬКО ЗДЕСЬ!)
 unsigned long heaterSeconds = 0;

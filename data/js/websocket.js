@@ -68,8 +68,9 @@ function checkDataTimeout() {
 function sendCommand(command, value) {
     if (!state.socket || state.socket.readyState !== WebSocket.OPEN) return;
     const msg = { command: command };
-    if (command === 'setPower') msg.value = value;
-    else if (command === 'setTarget') msg.value = value;
+    if (command === 'setPower' || command === 'setTarget' || command === 'resetTimer') {
+        msg.value = value;
+    }
     state.socket.send(JSON.stringify(msg));
 }
 
