@@ -48,4 +48,5 @@ void webSerialPrint(const char* msg);
  */
 void webSerialPrintf(const char* format, ...);
 
+
 #endif // WEBSERIAL_H

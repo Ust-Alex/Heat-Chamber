@@ -6,6 +6,7 @@
 #include <Arduino.h>
 #include <WebSerialLite.h>
 #include <uPID.h>
+#include <stdarg.h>
 #include "webserial.h"
 #include "config.h"
 
@@ -43,7 +44,6 @@ extern DeviceAddress sensorAddresses[MAX_SENSORS];
 // ============================================================================
 static void webSerialPrintlnSafe(const char* msg) {
   WebSerial.println(msg);
-  // Увеличенная задержка для гарантированной отправки всех строк
   delay(5);
 }
 
@@ -146,7 +146,6 @@ static void handleReceivedMessage(uint8_t* data, size_t len) {
     webSerialPrintfSafe("📊 ПИД: Kp=%.2f Ki=%.2f Kd=%.2f",
                         PIDregulator.Kp, PIDregulator.Ki, PIDregulator.Kd);
   } else if (cmd == "pid_reset") {
-    // Сброс к значениям из config.h
     PIDregulator.Kp = PID_KP;
     PIDregulator.Ki = PID_KI;
     PIDregulator.Kd = PID_KD;
@@ -166,6 +165,7 @@ static void handleReceivedMessage(uint8_t* data, size_t len) {
     onSetPID(Kp, Ki, Kd);
     webSerialPrintfSafe("✅ ПИД: Kp=%.2f Ki=%.2f Kd=%.2f", Kp, Ki, Kd);
   }
+
   // ========== ДАТЧИКИ ==========
   else if (cmd == "sensors") {
     webSerialPrintlnSafe("\n=== ДАТЧИКИ ТЕМПЕРАТУРЫ ===");
@@ -245,8 +245,19 @@ void setupWebSerial(AsyncWebServer* server) {
   Serial.println("/webserial");
   Serial.println("========================================\n");
 
-  // Приветствие
   webSerialPrintlnSafe("\n=== ESP32 WebSerial Console ===");
   webSerialPrintlnSafe("Введите 'help' для списка команд");
   webSerialPrintlnSafe("===============================\n");
+}
+
+// ============================================================================
+// ФУНКЦИЯ ДЛЯ ФОРМАТИРОВАННОГО ВЫВОДА ИЗ ДРУГИХ МОДУЛЕЙ
+// ============================================================================
+void webSerialPrintf(const char* format, ...) {
+  char buffer[256];
+  va_list args;
+  va_start(args, format);
+  vsnprintf(buffer, sizeof(buffer), format, args);
+  va_end(args);
+  WebSerial.print(buffer);
 }

@@ -17,8 +17,7 @@ void drawInterface(
   int sensorCount,
   int* targetHistory,
   float sensorHistory[][GRAPH_WIDTH],
-  int numSensors
-) {
+  int numSensors) {
   u8g2->clearBuffer();
 
   // --------------------------------------------------------------------------
@@ -29,7 +28,7 @@ void drawInterface(
   uint8_t hours = (elapsed / 3600000) % 100;
   uint8_t minutes = (elapsed / 60000) % 60;
   uint8_t seconds = (elapsed / 1000) % 60;
-  
+
   char timeStr[9];
   sprintf(timeStr, "%02u:%02u:%02u", hours, minutes, seconds);
   u8g2->drawStr(80, 8, timeStr);
