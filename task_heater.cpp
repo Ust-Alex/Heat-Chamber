@@ -15,6 +15,7 @@
 // ВНЕШНИЕ ФУНКЦИИ ДЛЯ WEBSERIAL ОТЛАДКИ
 // ============================================================================
 extern void webSerialPrintf(const char* format, ...);
+extern int8_t getWiFiTxPower(); 
 
 // ============================================================================
 // КОНСТАНТЫ НАСТРОЕК
@@ -60,6 +61,7 @@ extern uPID PIDregulator;
 // ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ
 // ============================================================================
 unsigned long heaterSeconds = 0;
+
 
 // ============================================================================
 // ЗАДАЧА УПРАВЛЕНИЯ НАГРЕВАТЕЛЕМ
@@ -293,6 +295,15 @@ void taskHeaterControl(void* pvParameters) {
                             PIDregulator.integral, maxIntegralCurrent, PIDregulator.Ki);
             webSerialPrintf("ForceMode=%d | AntiWindupActive=%d\n", 
                             forceModeActive, (errorAbs < INTEGRAL_LIMIT_THRESHOLD && error > 0));
+            
+            // 👇 ДОБАВЛЯЕМ МОЩНОСТЬ Wi-Fi
+            int8_t wifiPower = getWiFiTxPower();
+            if (wifiPower >= 0) {
+                webSerialPrintf("WiFi TX Power=%d dBm\n", wifiPower);
+            } else {
+                webSerialPrintf("WiFi TX Power=ERROR\n");
+            }
+            
             webSerialPrintf("================\n");
           }
 
