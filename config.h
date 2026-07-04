@@ -82,7 +82,7 @@
 // ============================================================================
 #define WIFI_SSID         "ZTE-UST"
 #define WIFI_PASS         "1456654123"
-#define WIFI_IP           IPAddress(192, 168, 100, 50)
+#define WIFI_IP           IPAddress(192, 168, 100, 250)
 #define WIFI_GATEWAY      IPAddress(192, 168, 100, 1)
 #define WIFI_SUBNET       IPAddress(255, 255, 255, 0)
 
